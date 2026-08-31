@@ -55,3 +55,4 @@ sync is implemented yet — this is just a placement note for that work.
 
 - [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
 # realtor-mobile
+# realtor-mobile
