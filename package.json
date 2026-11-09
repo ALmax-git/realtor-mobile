@@ -10,12 +10,17 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@almaxcloud/core-x": "file:../core-x-cli",
+    "@fortawesome/fontawesome-free": "^7.3.1",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-sql": "^2.4.0",
     "@tauri-apps/plugin-store": "^2.4.4",
     "alpinejs": "^3.16.3",
+    "bootstrap-icons": "^1.13.2",
+    "font-awesome": "^4.7.0",
+    "glightbox": "^3.3.1",
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {

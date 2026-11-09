@@ -1,794 +1,1696 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="h-full bg-slate-900 text-slate-100">
   <head>
     <meta charset="UTF-8" />
-    <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
     <title>Realtor</title>
-    <script type="module" src="/src/main.ts" defer></script>
+    <link rel="icon" type="image/png" href="/src/favicon.png" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <style>
+      body {
+        font-family: "Inter", sans-serif;
+      }
+      [x-cloak] {
+        display: none !important;
+      }
+      /* Custom scrollbars */
+      ::-webkit-scrollbar {
+        width: 5px;
+        height: 5px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #0f172a;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #334155;
+        border-radius: 4px;
+      }
+    </style>
+
+    <script type="module">
+      import Alpine from "alpinejs";
+      import { Auth } from "@almaxcloud/core-x";
+      import XEngine from "@almaxcloud/core-x";
+
+      window.xengine = XEngine();
+      const cms = {
+        "products.list": [
+          (arg) => {
+            const productId = JSON.stringify(String(arg?.[0] ?? ""));
+            return [
+              '<i class="bi bi-pen"></i> ' + "Edit Product",
+              `window.xStore.edit_product({ uuid: ${productId} });`,
+            ];
+          },
+          (arg) => {
+            const productId = JSON.stringify(String(arg?.[0] ?? ""));
+            return [
+              '<i class="bi bi-image"></i> ' + "Upload Images",
+              `window.xStore.init_product_media_upload({ uuid: ${productId} })`,
+            ];
+          },
+          (arg) => {
+            const productId = JSON.stringify(String(arg?.[0] ?? ""));
+            return [
+              '<i class="bi bi-trash"></i> ' + "Delete Product",
+              `window.xStore.init_delete_product({ uuid: ${productId} })`,
+            ];
+          },
+        ],
+        "staffs.list": [
+          (arg) => {
+            const staffId = JSON.stringify(String(arg?.[0] ?? ""));
+            return [
+              '<i class="bi bi-pen"></i> ' + "Edit Staff",
+              `window.xStore.edit_staff({ uuid: ${staffId} });`,
+            ];
+          },
+          (arg) => {
+            const staffId = JSON.stringify(String(arg?.[0] ?? ""));
+            return [
+              '<i class="bi bi-pencil"></i> ' + "Message Staff",
+              `window.xStore.edit_staff({ uuid: ${staffId} });`,
+            ];
+          },
+          (arg) => {
+            const staffId = JSON.stringify(String(arg?.[0] ?? ""));
+            return [
+              '<i class="bi bi-files"></i> ' + "Report Staff",
+              `window.xStore.init_delete_staff({ uuid: ${staffId} })`,
+            ];
+          },
+          (arg) => {
+            const staffId = JSON.stringify(String(arg?.[0] ?? ""));
+            return [
+              '<i class="bi bi-trash"></i> ' + "Delete Staff",
+              `window.xStore.init_delete_staff({ uuid: ${staffId} })`,
+            ];
+          },
+        ],
+      };
+
+      document.addEventListener("alpine:init", () => {
+        Alpine.data("contextMenu", () => ({
+          open: false,
+          showBegin: false,
+          showMenu: false,
+          x: 0,
+          y: 0,
+          items: [],
+
+          init() {
+            // Global listener bridged from window.showcm
+            window.addEventListener("open-context-menu", (e) => {
+              this.openMenu(e.detail.e, e.detail.cl, e.detail.arg);
+            });
+          },
+
+          openMenu(e, cl, arg) {
+            e.preventDefault();
+            this.x = e.clientX;
+            this.y = e.clientY;
+
+            // Parse menu items from your cms structure
+            let processedItems = [];
+            if (cms[cl]) {
+              cms[cl].forEach((item) => {
+                if (typeof item === "function") {
+                  let evaluatedArg = arg || {};
+                  evaluatedArg.event = e;
+                  let ret = item(evaluatedArg);
+                  if (ret !== "null") {
+                    processedItems.push({
+                      type: "link",
+                      label: ret[0],
+                      action: ret[1],
+                    });
+                  }
+                } else if (typeof item === "string") {
+                  processedItems.push({ type: "html", html: item });
+                } else if (Array.isArray(item)) {
+                  processedItems.push({
+                    type: "link",
+                    label: item[0],
+                    action: item[1],
+                  });
+                }
+              });
+            }
+            this.items = processedItems;
+
+            this.open = true;
+            this.showBegin = true;
+
+            // Focus and handle viewport collision detection
+            this.$nextTick(() => {
+              if (this.$refs.foc) this.$refs.foc.focus();
+
+              setTimeout(() => {
+                this.showMenu = true;
+                this.adjustBoundaries(e);
+              }, 50);
+            });
+          },
+
+          adjustBoundaries(e) {
+            let el = this.$el;
+            let htmlHeight = document.documentElement.offsetHeight;
+            let htmlWidth = document.documentElement.offsetWidth;
+
+            if (e.clientY + el.offsetHeight > htmlHeight) {
+              this.y = e.clientY - el.offsetHeight;
+            }
+            if (e.clientX + el.offsetWidth > htmlWidth) {
+              this.x = htmlWidth - el.offsetWidth - 5;
+            }
+          },
+
+          executeAction(action) {
+            if (action) {
+              try {
+                new Function(action)();
+              } catch (err) {
+                console.error("Menu action execution error:", err);
+              }
+              this.close();
+            }
+          },
+
+          close() {
+            this.showMenu = false;
+            setTimeout(() => {
+              this.showBegin = false;
+              this.open = false;
+            }, 200);
+          },
+        }));
+      });
+
+      function Realtor() {
+        return {
+          view: "loading",
+          booting: false,
+          bootDone: true,
+          loading_progress: 0,
+          is_loading: true,
+          currentBootText: "",
+          boot: null,
+          bootSequence: [
+            "",
+            "ESTABLISHING SECURE CONNECTION...",
+            "",
+            "Booting...",
+            "",
+            "Starting Services",
+            "",
+            "SYSTEM ONLINE.",
+            "",
+          ],
+          ...Auth(),
+          currentStep: 1,
+          loading: false,
+          viewMode: "list", // 'form' or 'list'
+          showPayloadModal: false,
+          showPreviewModal: false,
+          selectedPreview: null,
+          isEditMode: false,
+          savedClients: [],
+          notification: { show: false, message: "", type: "info" },
+
+          steps: [
+            { title: "Personal Setup" },
+            { title: "Location Details" },
+            { title: "Verification" },
+            { title: "Kin & Referee" },
+            { title: "Financial Info" },
+            { title: "Review" },
+          ],
+
+          countries: [
+            { id: 1, name: "Nigeria" },
+            { id: 2, name: "United States" },
+            { id: 3, name: "United Kingdom" },
+          ],
+          states: [
+            { id: 101, country_id: 1, name: "Lagos" },
+            { id: 102, country_id: 1, name: "Abuja (FCT)" },
+            { id: 201, country_id: 2, name: "California" },
+            { id: 301, country_id: 3, name: "London" },
+          ],
+          cities: [
+            { id: 1001, state_id: 101, name: "Ikeja" },
+            { id: 1002, state_id: 101, name: "Lekki" },
+          ],
+          filteredStates: [],
+          filteredCities: [],
+
+          // Main Payload Schema
+          payload: {},
+
+          user: {},
+
+          async init(userId = "0xff") {
+            if (
+              typeof window != undefined &&
+              typeof window.xengine != undefined
+            ) {
+              this.boot = await xengine.new_app(
+                "com.realtor.agent",
+                "public_api_token_please_kepp_in_env",
+              );
+            }
+            await this.auth_check();
+            this.user = this.auth;
+
+            for (let i = 0; i < this.bootSequence.length; i++) {
+              this.currentBootText = this.bootSequence[i];
+              this.loading_progress =
+                ((i + 1) / this.bootSequence.length) * 100;
+
+              // Random delay between lines for realism (300ms - 800ms)
+              const delay = Math.floor(Math.random() * 500) + 300;
+              await new Promise((r) => setTimeout(r, delay));
+            }
+            // Final dramatic pause before revealing the app
+            await new Promise((r) => setTimeout(r, 600));
+            this.is_loading = false;
+            this.init_Data();
+            const modals = document.getElementById("modals");
+            if (modals) {
+              modals.classList.remove("hidden");
+              modals.setAttribute("x-show", "!is_loading");
+            }
+          },
+
+          getEmptyPayload() {
+            return {
+              name: "",
+              username: "",
+              email: "",
+              password: "",
+              first_name: "",
+              surname: "",
+              last_name: "",
+              phone_number: "",
+              country_id: "",
+              state_id: "",
+              city_id: "",
+              bio: "",
+              profile_photo_path: null,
+              client_id: "CLT-" + Math.floor(100000 + Math.random() * 900000),
+              language: "en",
+              visibility: "public",
+              gender: "",
+              address: "",
+              date_of_birth: "",
+              last_seen_at: new Date().toISOString(),
+              account_type: "standard",
+              status: "active",
+              preferences: {},
+              documents_id: null,
+              pictures_id: null,
+              videos_id: null,
+              music_id: null,
+              disk_size: 1073741824,
+              used_disk_size: 0,
+              timezone: "Africa/Lagos",
+              pin: "",
+              ota_key: null,
+              ota_key_updated_at: null,
+              prev_ota_key: null,
+              ota_key_expiry_minutes: 60,
+              is_ota_enabled: false,
+              nin: "",
+              bvn: "",
+              occupation: "",
+              data_of_employement: "",
+              office_address: "",
+              office_position: "",
+              telephone: "",
+              date_emploayed: "",
+              marital_status: "",
+              nationality: "",
+              residential_address: "",
+              is_rented: false,
+              means_of_id: "",
+              id_number: "",
+              next_of_kin_id: null,
+              signature_id: null,
+              relation_with_kin: "",
+
+              next_of_kin: {
+                name: "",
+                username: "",
+                email: "",
+                first_name: "",
+                surname: "",
+                last_name: "",
+                phone_number: "",
+                visibility: "private",
+                status: "active",
+                country_id: "",
+                state_id: "",
+                city_id: "",
+                gender: "",
+                address: "",
+                telephone: "",
+                nationality: "",
+              },
+              referee: {
+                name: "",
+                referee_number: "",
+                known_period: "",
+                current_account_with: "",
+                referee_name: "",
+                bank_name_address: "",
+                referee_account_number: "",
+              },
+              equity_application: {
+                morgage_type: "",
+                morgage_lender_address: "",
+                morgage_lender: "",
+                property_address: "",
+                property_type: "",
+                property_value: 0,
+                rsa_balance: 0,
+                rsa_holder: "",
+                equity_amount: 0,
+                supplementary_payment_amount: 0,
+                meta: {},
+              },
+              meta: {
+                amount_of_loan_required: 0,
+                purpose_of_loan_required: "Property Acquisition",
+                loan_repayment_period: "",
+                monthly_salary_or_income: 0,
+                source_of_loan_repayment: "",
+              },
+              bank: {
+                account_name: "",
+                account_number: "",
+                bank_id: "",
+              },
+            };
+          },
+
+          init_Data() {
+            this.payload = this.getEmptyPayload();
+            this.generateRandomUsername();
+            this.loadSavedClients();
+          },
+
+          // Generate system random username
+          generateRandomUsername() {
+            const prefixes = ["realtor", "client", "user", "investor", "agent"];
+            const randPrefix =
+              prefixes[Math.floor(Math.random() * prefixes.length)];
+            const randNum = Math.floor(1000 + Math.random() * 9000);
+            this.payload.username = `${randPrefix}_${randNum}`;
+          },
+
+          updateFullName() {
+            const parts = [
+              this.payload.first_name,
+              this.payload.surname,
+              this.payload.last_name,
+            ].filter(Boolean);
+            this.payload.name = parts.join(" ");
+          },
+
+          updateKinName() {
+            const parts = [
+              this.payload.next_of_kin.first_name,
+              this.payload.next_of_kin.surname,
+            ].filter(Boolean);
+            this.payload.next_of_kin.name = parts.join(" ");
+          },
+
+          onCountryChange() {
+            this.filteredStates = this.states.filter(
+              (s) => s.country_id == this.payload.country_id,
+            );
+            this.payload.state_id = "";
+            this.payload.city_id = "";
+            this.filteredCities = [];
+          },
+
+          onStateChange() {
+            this.filteredCities = this.cities.filter(
+              (c) => c.state_id == this.payload.state_id,
+            );
+            this.payload.city_id = "";
+          },
+
+          isStepValid(stepNum) {
+            if (stepNum === 1) {
+              return (
+                this.payload.first_name &&
+                this.payload.surname &&
+                this.payload.email &&
+                this.payload.password
+              );
+            }
+            return true;
+          },
+
+          nextStep() {
+            if (!this.isStepValid(this.currentStep)) {
+              this.notify("Please fill required fields (*)", "warning");
+              return;
+            }
+            if (this.currentStep < this.steps.length) {
+              this.currentStep++;
+            }
+          },
+
+          prevStep() {
+            if (this.currentStep > 1) {
+              this.currentStep--;
+            }
+          },
+
+          toggleViewMode() {
+            this.viewMode = this.viewMode === "form" ? "list" : "form";
+          },
+
+          startNewForm() {
+            this.isEditMode = false;
+            this.payload = this.getEmptyPayload();
+            this.generateRandomUsername();
+            this.currentStep = 1;
+            this.viewMode = "form";
+          },
+
+          loadSavedClients() {
+            try {
+              const localData = localStorage.getItem("realtor_clients");
+              if (localData) {
+                this.savedClients = JSON.parse(localData);
+              }
+            } catch (e) {
+              this.savedClients = [];
+            }
+          },
+
+          // Save or Update Client to LocalStorage
+          async save_client() {
+            this.loading = true;
+
+            // Mock API post handler wrapper targeting local storage persistence
+            const req = {
+              post: (url, data) => {
+                return new Promise((resolve) => {
+                  setTimeout(() => {
+                    let clients = [];
+                    try {
+                      clients = JSON.parse(
+                        localStorage.getItem("realtor_clients") || "[]",
+                      );
+                    } catch (e) {
+                      clients = [];
+                    }
+
+                    const existingIndex = clients.findIndex(
+                      (c) => c.client_id === data.client_id,
+                    );
+                    data.last_seen_at = new Date().toISOString();
+
+                    if (existingIndex > -1) {
+                      clients[existingIndex] = data;
+                    } else {
+                      clients.unshift(data);
+                    }
+
+                    localStorage.setItem(
+                      "realtor_clients",
+                      JSON.stringify(clients),
+                    );
+
+                    resolve({
+                      status: 200,
+                      data: {
+                        success: true,
+                        message: "Saved to local storage",
+                        client_id: data.client_id,
+                      },
+                    });
+                  }, 600);
+                });
+              },
+            };
+
+            try {
+              let res = await req.post(
+                "api/v1/realtor/client/save",
+                this.payload,
+              );
+              if (res.data.success) {
+                this.notify(
+                  this.isEditMode
+                    ? "Client profile updated!"
+                    : "Client saved to Local Storage!",
+                  "success",
+                );
+                this.loadSavedClients();
+                setTimeout(() => {
+                  this.viewMode = "list";
+                }, 800);
+              }
+            } catch (err) {
+              this.notify("Failed to save client locally.", "error");
+            } finally {
+              this.loading = false;
+            }
+          },
+
+          previewClient(client) {
+            this.selectedPreview = client;
+            this.showPreviewModal = true;
+          },
+
+          editClient(client) {
+            this.isEditMode = true;
+            this.payload = JSON.parse(JSON.stringify(client));
+            this.currentStep = 1;
+            this.viewMode = "form";
+            this.notify(`Editing Client: ${client.client_id}`, "info");
+          },
+
+          deleteClient(clientId) {
+            if (confirm(`Remove client record ${clientId}?`)) {
+              this.savedClients = this.savedClients.filter(
+                (c) => c.client_id !== clientId,
+              );
+              localStorage.setItem(
+                "realtor_clients",
+                JSON.stringify(this.savedClients),
+              );
+              this.notify("Client record removed.", "info");
+            }
+          },
+
+          notify(msg, type = "info") {
+            this.notification = { show: true, message: msg, type: type };
+            setTimeout(() => {
+              this.notification.show = false;
+            }, 3500);
+          },
+        };
+      }
+
+      Alpine.data("Realtor", Realtor);
+
+      window.Alpine = Alpine;
+
+      Alpine.start();
+    </script>
   </head>
-
-  <body>
-    <div
-      class="app-shell flex flex-col min-h-screen items-center justify-center p-6"
-      x-data="authApp()"
-      x-cloak
+  <body
+    class="h-full bg-slate-950 text-slate-100 antialiased selection:bg-indigo-500 selection:text-white flex flex-col justify-between"
+    x-data="Realtor()"
+  >
+    <!-- Top Header Mobile First -->
+    <header
+      class="border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-40"
     >
-      <h1>Realtor Field Agent</h1>
-      <!-- ============ Loading / auth-check splash ============ -->
       <div
-        x-show="view === 'loading'"
-        x-transition.opacity
-        class="flex flex-col items-center gap-4 text-teal-300/80"
+        class="px-4 py-3 flex items-center justify-between max-w-4xl mx-auto"
       >
-        <div
-          class="h-10 w-10 animate-spin rounded-full border-2 border-teal-400/30 border-t-teal-300"
-        ></div>
-        <p class="text-sm tracking-wide">Checking session&hellip;</p>
-      </div>
-
-      <!-- ============ Login screen ============ -->
-      <div
-        x-show="view === 'login'"
-        x-transition.opacity.duration.300ms
-        class="glass-card w-full max-w-sm rounded-3xl p-8 sm:p-10"
-      >
-        <div class="mb-8 flex flex-col items-center text-center">
+        <div class="flex items-center gap-2.5">
           <div
-            class="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-300 to-teal-600 shadow-lg shadow-teal-500/30"
+            class="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-600/30"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#04201c"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              class="h-7 w-7"
-            >
-              <path d="M3 11.5 12 4l9 7.5" />
-              <path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9" />
-            </svg>
+            <i class="fa-solid fa-user-plus text-sm"></i>
           </div>
-          <h1 class="text-xl font-semibold tracking-tight text-white">
-            Realtor Field Agent
-          </h1>
-          <p class="mt-1 text-sm text-slate-400">
-            Sign in to start a client intake session
-          </p>
-        </div>
-
-        <form class="space-y-5" @submit.prevent="submitLogin()">
           <div>
-            <label
-              for="email"
-              class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400"
-              >Email</label
-            >
-            <input
-              id="email"
-              type="email"
-              autocomplete="username"
-              inputmode="email"
-              required
-              x-model="email"
-              :disabled="loading"
-              placeholder="agent@example.com"
-              class="field-input w-full rounded-xl px-4 py-3 text-sm text-white placeholder:text-slate-500"
-            />
-          </div>
-
-          <div>
-            <label
-              for="password"
-              class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400"
-              >Password</label
-            >
-            <input
-              id="password"
-              type="password"
-              autocomplete="current-password"
-              required
-              x-model="password"
-              :disabled="loading"
-              placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"
-              class="field-input w-full rounded-xl px-4 py-3 text-sm text-white placeholder:text-slate-500"
-            />
-          </div>
-
-          <div class="flex items-center justify-between pt-1">
-            <button
-              type="button"
-              class="flex items-center gap-2 text-sm text-slate-300"
-              @click="remember = !remember"
-              :disabled="loading"
-            >
-              <span
-                class="toggle-track relative inline-flex h-5 w-9 items-center rounded-full"
-                :class="remember ? 'bg-teal-400/80' : 'bg-slate-600/60'"
-              >
-                <span
-                  class="toggle-thumb inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow"
-                  :class="remember ? 'translate-x-[18px]' : 'translate-x-[3px]'"
-                ></span>
-              </span>
-              Remember me
-            </button>
-          </div>
-
-          <!-- Inline error for failed login (401 / 422 / network) -->
-          <div
-            x-show="error"
-            x-transition.opacity
-            x-text="error"
-            class="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-sm text-rose-300"
-          ></div>
-
-          <button
-            type="submit"
-            :disabled="loading"
-            class="btn-primary flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold"
-          >
-            <svg
-              x-show="loading"
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              class="h-4 w-4 animate-spin"
-              fill="none"
-            >
-              <circle
-                class="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                stroke-width="4"
-              ></circle>
-              <path
-                class="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z"
-              ></path>
-            </svg>
-            <span x-text="loading ? 'Signing in…' : 'Sign in'"></span>
-          </button>
-        </form>
-
-        <p class="mt-6 text-center text-xs text-slate-500">
-          Connecting to your organization's Realtor server
-        </p>
-      </div>
-
-      <!-- ============ Authenticated app: client dashboard + intake wizard ============ -->
-      <div
-        x-show="view === 'app'"
-        x-transition.opacity.duration.300ms
-        x-data="clientWorkspace()"
-        class="flex w-full max-w-md flex-col gap-4"
-      >
-        <!-- Header: identity, sync status, logout -->
-        <div class="glass-card flex items-center justify-between rounded-3xl p-4 sm:p-5">
-          <div class="min-w-0">
-            <p class="text-[11px] uppercase tracking-wider text-slate-500">
-              Field officer
-            </p>
+            <h1 class="text-sm font-bold text-white leading-tight">
+              Client Acquisition
+            </h1>
             <p
-              class="truncate text-sm font-medium text-white"
-              x-text="user?.name || user?.email || 'Signed in'"
+              class="text-[10px] text-slate-400"
+              x-text="viewMode === 'form' ? `Step ${currentStep} of ${steps.length}` : 'Saved Records'"
             ></p>
           </div>
-          <div class="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              @click="triggerSyncNow()"
-              class="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition"
-              :class="{
-                'bg-sky-400/15 text-sky-300': syncSummary.state === 'syncing',
-                'bg-amber-400/15 text-amber-300': syncSummary.state !== 'syncing' && (syncSummary.pendingCount > 0 || syncSummary.failedCount > 0),
-                'bg-teal-400/15 text-teal-300': syncSummary.state !== 'syncing' && syncSummary.pendingCount === 0 && syncSummary.failedCount === 0 && syncSummary.state !== 'offline',
-                'bg-slate-500/15 text-slate-400': syncSummary.state === 'offline' && syncSummary.pendingCount === 0 && syncSummary.failedCount === 0,
-              }"
-              :title="syncSummary.lastError || ''"
+        </div>
+
+        <!-- View Toggle & Actions -->
+        <div class="flex items-center gap-2">
+          <button
+            @click="toggleViewMode()"
+            class="text-xs px-3 py-1.5 rounded-lg bg-indigo-950/70 border border-indigo-700/50 text-indigo-300 font-medium transition flex items-center gap-1.5"
+          >
+            <i
+              class="fa-solid"
+              :class="viewMode === 'form' ? 'fa-list-check' : 'fa-plus'"
+            ></i>
+            <span
+              x-text="viewMode === 'form' ? `Saved (${savedClients.length})` : 'New Client'"
+            ></span>
+          </button>
+
+          <button
+            x-show="viewMode === 'form'"
+            @click="showPayloadModal = true"
+            class="text-xs p-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700"
+          >
+            <i class="fa-solid fa-code"></i>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="px-3 sm:px-6 py-4 flex-1 w-full max-w-4xl mx-auto">
+      <!-- VIEW MODE 1: CLIENT SAVED RECORDS LIST -->
+      <div x-show="viewMode === 'list'" x-cloak class="space-y-4" x-transition>
+        <div
+          class="flex items-center justify-between border-b border-slate-800 pb-3"
+        >
+          <div>
+            <h2 class="text-base font-bold text-white">
+              Saved Client Profiles
+            </h2>
+            <p class="text-xs text-slate-400">
+              Stored safely in local storage.
+            </p>
+          </div>
+          <button
+            @click="startNewForm()"
+            class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition"
+          >
+            + Add Client
+          </button>
+        </div>
+
+        <!-- Empty State -->
+        <template x-if="savedClients.length === 0">
+          <div
+            class="text-center py-12 px-4 bg-slate-900/50 border border-slate-800 rounded-2xl"
+          >
+            <div
+              class="w-12 h-12 bg-slate-800 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-3"
             >
-              <span
-                class="h-1.5 w-1.5 rounded-full bg-current"
-                :class="syncSummary.state === 'syncing' ? 'animate-pulse' : ''"
-              ></span>
-              <span x-show="syncSummary.state === 'syncing'">Syncing&hellip;</span>
-              <span x-show="syncSummary.state === 'offline' && syncSummary.pendingCount === 0 && syncSummary.failedCount === 0">Offline</span>
-              <span x-show="syncSummary.state !== 'syncing' && syncSummary.failedCount > 0" x-text="syncSummary.failedCount + ' sync error' + (syncSummary.failedCount === 1 ? '' : 's')"></span>
-              <span x-show="syncSummary.state !== 'syncing' && syncSummary.failedCount === 0 && syncSummary.pendingCount > 0" x-text="syncSummary.pendingCount + ' pending'"></span>
-              <span x-show="syncSummary.state !== 'syncing' && syncSummary.failedCount === 0 && syncSummary.pendingCount === 0 && syncSummary.state !== 'offline'">All synced</span>
-            </button>
+              <i class="fa-solid fa-folder-open text-xl"></i>
+            </div>
+            <h3 class="text-sm font-semibold text-slate-200">
+              No client records found
+            </h3>
+            <p class="text-xs text-slate-400 mt-1 mb-4">
+              Complete the onboarding wizard to store clients locally.
+            </p>
             <button
-              type="button"
-              @click="logoutAction()"
-              :disabled="loading"
-              class="rounded-full border border-slate-600/60 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-rose-400/40 hover:text-rose-300 disabled:opacity-60"
+              @click="startNewForm()"
+              class="text-xs px-4 py-2 bg-indigo-600 text-white font-medium rounded-xl"
             >
-              <span x-text="loading ? '…' : 'Sign out'"></span>
+              Create First Client
             </button>
+          </div>
+        </template>
+
+        <!-- Card Grid for Mobile -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <template x-for="(item, idx) in savedClients" :key="item.client_id">
+            <div
+              class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between hover:border-slate-700 transition"
+            >
+              <div>
+                <div class="flex items-center justify-between mb-2">
+                  <span
+                    class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-950 text-indigo-400 border border-indigo-800/40"
+                    x-text="item.client_id"
+                  ></span>
+                  <span
+                    class="text-[10px] text-slate-400"
+                    x-text="new Date(item.last_seen_at).toLocaleDateString()"
+                  ></span>
+                </div>
+                <h3
+                  class="text-sm font-bold text-white"
+                  x-text="item.name || 'Unnamed Client'"
+                ></h3>
+                <div
+                  class="text-xs text-indigo-400 font-mono mb-2"
+                  x-text="'@' + item.username"
+                ></div>
+
+                <div
+                  class="space-y-1 text-xs text-slate-300 border-t border-slate-800/80 pt-2"
+                >
+                  <div class="flex items-center gap-2 text-slate-400">
+                    <i class="fa-solid fa-envelope text-[10px] w-4"></i>
+                    <span
+                      class="truncate"
+                      x-text="item.email || 'No email'"
+                    ></span>
+                  </div>
+                  <div class="flex items-center gap-2 text-slate-400">
+                    <i class="fa-solid fa-phone text-[10px] w-4"></i>
+                    <span x-text="item.phone_number || 'No phone'"></span>
+                  </div>
+                  <div class="flex items-center gap-2 text-slate-400">
+                    <i class="fa-solid fa-landmark text-[10px] w-4"></i>
+                    <span
+                      class="text-emerald-400 font-semibold"
+                      x-text="`₦${item.meta?.amount_of_loan_required || 0} Loan`"
+                    ></span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card Actions -->
+              <div
+                class="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-slate-800"
+              >
+                <button
+                  @click="previewClient(item)"
+                  class="text-xs px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                >
+                  <i class="fa-solid fa-eye text-indigo-400"></i> Preview
+                </button>
+                <button
+                  @click="editClient(item)"
+                  class="text-xs px-2.5 py-1 rounded-lg bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-800/40"
+                >
+                  <i class="fa-solid fa-pen-to-square"></i> Edit
+                </button>
+                <button
+                  @click="deleteClient(item.client_id)"
+                  class="text-xs px-2 py-1 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40"
+                >
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- VIEW MODE 2: FORM WIZARD -->
+      <div x-show="viewMode === 'form'" class="space-y-4">
+        <!-- Progress Stepper Header (Mobile Optimized) -->
+        <div class="bg-slate-900 p-3 rounded-xl border border-slate-800">
+          <div class="flex items-center justify-between text-xs mb-2">
+            <span
+              class="font-semibold text-slate-300"
+              x-text="steps[currentStep - 1].title"
+            ></span>
+            <span
+              class="text-indigo-400 font-mono text-[11px]"
+              x-text="`${currentStep} / ${steps.length}`"
+            ></span>
+          </div>
+          <div
+            class="w-full bg-slate-800 rounded-full h-2 overflow-hidden flex"
+          >
+            <template x-for="(step, i) in steps" :key="i">
+              <div
+                class="h-full border-r border-slate-900 transition-all duration-300"
+                :class="i + 1 <= currentStep ? 'bg-indigo-500' : 'bg-slate-800'"
+                :style="`width: ${100 / steps.length}%`"
+              ></div>
+            </template>
           </div>
         </div>
 
-        <!-- ============ Dashboard: local client list ============ -->
-        <template x-if="screen === 'dashboard'">
-          <div class="glass-card max-h-[75vh] overflow-y-auto rounded-3xl p-5 sm:p-6">
-            <div class="mb-5 flex items-center justify-between">
-              <h2 class="text-base font-semibold text-white">Your clients</h2>
-              <button
-                type="button"
-                @click="startNewClient()"
-                class="btn-primary rounded-xl px-3.5 py-2 text-xs font-semibold"
-              >
-                + New client
-              </button>
-            </div>
-
-            <p x-show="loadingClients" class="text-sm text-slate-500">Loading&hellip;</p>
-            <p
-              x-show="!loadingClients && clients.length === 0"
-              class="rounded-xl border border-dashed border-slate-600/50 px-4 py-8 text-center text-sm text-slate-500"
-            >
-              No clients yet. Start a new intake to create your first draft —
-              it saves locally immediately, even offline.
-            </p>
-
-            <ul class="divide-y divide-white/5">
-              <template x-for="c in clients" :key="c.local_id">
-                <li class="flex items-center justify-between gap-3 py-3">
-                  <button
-                    type="button"
-                    @click="resumeClient(c.local_id)"
-                    class="min-w-0 flex-1 text-left"
-                  >
-                    <p
-                      class="truncate text-sm font-medium text-white"
-                      x-text="(c.first_name + ' ' + c.surname).trim() || 'Untitled client'"
-                    ></p>
-                    <p class="truncate text-xs text-slate-500" x-text="c.phone_no || 'No phone number yet'"></p>
-                  </button>
-                  <span
-                    class="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium"
-                    :class="syncBadge(c).className"
-                    x-text="syncBadge(c).label"
-                  ></span>
-                  <button
-                    type="button"
-                    @click="removeClient(c.local_id)"
-                    class="shrink-0 text-slate-500 transition hover:text-rose-300"
-                    title="Delete draft"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
-                      <path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                    </svg>
-                  </button>
-                </li>
-              </template>
-            </ul>
+        <!-- Alert Notification Box -->
+        <div
+          x-show="notification.show"
+          x-transition
+          :class="{
+                    'bg-emerald-950/90 border-emerald-600 text-emerald-200': notification.type === 'success',
+                    'bg-rose-950/90 border-rose-600 text-rose-200': notification.type === 'error',
+                    'bg-amber-950/90 border-amber-600 text-amber-200': notification.type === 'warning'
+                 }"
+          class="p-3 rounded-xl border flex items-center justify-between shadow-lg text-xs"
+          x-cloak
+        >
+          <div class="flex items-center gap-2">
+            <i
+              :class="{
+                        'fa-solid fa-circle-check text-emerald-400': notification.type === 'success',
+                        'fa-solid fa-triangle-exclamation text-rose-400': notification.type === 'error',
+                        'fa-solid fa-circle-info text-amber-400': notification.type === 'warning'
+                    }"
+              class="text-base"
+            ></i>
+            <span class="font-medium" x-text="notification.message"></span>
           </div>
-        </template>
+          <button
+            @click="notification.show = false"
+            class="opacity-70 hover:opacity-100 p-1"
+          >
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
 
-        <!-- ============ Wizard: step-by-step client intake ============ -->
-        <template x-if="screen === 'wizard' && core">
-          <div class="glass-card max-h-[80vh] overflow-y-auto rounded-3xl p-5 sm:p-6">
-            <!-- Step progress -->
-            <div class="mb-6 flex items-center justify-between gap-1">
-              <template x-for="(label, i) in wizardSteps" :key="i">
-                <button
-                  type="button"
-                  @click="goStep(i)"
-                  class="flex flex-1 flex-col items-center gap-1.5 text-center"
-                >
-                  <span
-                    class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition"
-                    :class="i === wizardStep ? 'bg-teal-400 text-ink-950' : i < wizardStep ? 'bg-teal-400/25 text-teal-300' : 'bg-white/5 text-slate-500'"
-                    x-text="i + 1"
-                  ></span>
-                  <span
-                    class="hidden text-[10px] leading-tight sm:block"
-                    :class="i === wizardStep ? 'text-teal-300' : 'text-slate-500'"
-                    x-text="label"
-                  ></span>
-                </button>
-              </template>
-            </div>
-
-            <div
-              x-show="wizardError"
-              x-text="wizardError"
-              class="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-sm text-rose-300"
-            ></div>
-
-            <!-- Step 0: core client info -->
-            <div x-show="wizardStep === 0" class="space-y-4">
-              <div class="grid grid-cols-2 gap-3">
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">First name *</label>
-                  <input x-model="core.first_name" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                  <p x-show="coreErrors.first_name" x-text="coreErrors.first_name" class="mt-1 text-xs text-rose-300"></p>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Middle name</label>
-                  <input x-model="core.middle_name" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Surname *</label>
-                  <input x-model="core.surname" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                  <p x-show="coreErrors.surname" x-text="coreErrors.surname" class="mt-1 text-xs text-rose-300"></p>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Phone *</label>
-                  <input x-model="core.phone_no" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                  <p x-show="coreErrors.phone_no" x-text="coreErrors.phone_no" class="mt-1 text-xs text-rose-300"></p>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Email</label>
-                  <input x-model="core.email" type="email" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                  <p x-show="coreErrors.email" x-text="coreErrors.email" class="mt-1 text-xs text-rose-300"></p>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Account number</label>
-                  <input x-model="core.account_number" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Date of birth</label>
-                  <input x-model="core.dob" type="date" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Sex</label>
-                  <select x-model="core.sex" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white">
-                    <option value="">—</option>
-                    <template x-for="opt in sexOptions" :key="opt.value">
-                      <option :value="opt.value" x-text="opt.label"></option>
-                    </template>
-                  </select>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Marital status</label>
-                  <select x-model="core.marital_status" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white">
-                    <option value="">—</option>
-                    <template x-for="opt in maritalStatusOptions" :key="opt.value">
-                      <option :value="opt.value" x-text="opt.label"></option>
-                    </template>
-                  </select>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Nationality</label>
-                  <input x-model="core.nationality" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">State</label>
-                  <select x-model.number="core.state_id" @change="onStateChange()" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white">
-                    <option value="">—</option>
-                    <template x-for="s in states" :key="s.id">
-                      <option :value="s.id" x-text="s.name"></option>
-                    </template>
-                  </select>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">City</label>
-                  <select x-model.number="core.city_id" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white">
-                    <option value="">—</option>
-                    <template x-for="c in cities" :key="c.id">
-                      <option :value="c.id" x-text="c.name"></option>
-                    </template>
-                  </select>
-                </div>
-                <div class="col-span-2">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Residential address</label>
-                  <textarea x-model="core.residential_address" rows="2" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white"></textarea>
-                </div>
-                <div class="col-span-2">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Employer name &amp; address</label>
-                  <textarea x-model="core.employer_name_address" rows="2" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white"></textarea>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Means of ID</label>
-                  <select x-model="core.means_of_identification" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white">
-                    <option value="">—</option>
-                    <template x-for="opt in meansOfIdOptions" :key="opt.value">
-                      <option :value="opt.value" x-text="opt.label"></option>
-                    </template>
-                  </select>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">ID number</label>
-                  <input x-model="core.id_number" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">NIN (11 digits)</label>
-                  <input x-model="core.nin" maxlength="11" inputmode="numeric" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                  <p x-show="coreErrors.nin" x-text="coreErrors.nin" class="mt-1 text-xs text-rose-300"></p>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">BVN (11 digits)</label>
-                  <input x-model="core.bvn" maxlength="11" inputmode="numeric" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                  <p x-show="coreErrors.bvn" x-text="coreErrors.bvn" class="mt-1 text-xs text-rose-300"></p>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Account category</label>
-                  <select x-model="core.account_category" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white">
-                    <option value="">—</option>
-                    <template x-for="opt in accountCategoryOptions" :key="opt.value">
-                      <option :value="opt.value" x-text="opt.label"></option>
-                    </template>
-                  </select>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Applicant signed date</label>
-                  <input x-model="core.applicant_signed_date" type="date" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Purpose of account</label>
-                  <textarea x-model="core.purpose_of_account" rows="2" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white"></textarea>
-                </div>
-              </div>
-            </div>
-
-            <!-- Step 1: next of kin (optional, single) -->
-            <div x-show="wizardStep === 1" class="space-y-4">
-              <button
-                type="button"
-                @click="hasNextOfKin = !hasNextOfKin"
-                class="flex items-center gap-2 text-sm text-slate-300"
+        <!-- Form Card -->
+        <div
+          class="bg-slate-900 border border-slate-800 rounded-xl shadow-xl overflow-hidden flex flex-col justify-between"
+        >
+          <!-- STEP 1: Personal & Account Setup -->
+          <div
+            x-show="currentStep === 1"
+            class="p-4 sm:p-6 space-y-4"
+            x-transition:enter="transition ease-out duration-200 transform opacity-0 translate-x-2"
+            x-transition:enter-end="opacity-100 translate-x-0"
+          >
+            <div class="border-b border-slate-800 pb-3">
+              <h2
+                class="text-base font-bold text-white flex items-center gap-2"
               >
-                <span
-                  class="toggle-track relative inline-flex h-5 w-9 items-center rounded-full"
-                  :class="hasNextOfKin ? 'bg-teal-400/80' : 'bg-slate-600/60'"
-                >
-                  <span
-                    class="toggle-thumb inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow"
-                    :class="hasNextOfKin ? 'translate-x-[18px]' : 'translate-x-[3px]'"
-                  ></span>
-                </span>
-                This client has a next of kin
-              </button>
-
-              <div x-show="hasNextOfKin" class="grid grid-cols-2 gap-3">
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Name *</label>
-                  <input x-model="nextOfKin.name" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                  <p x-show="nextOfKinErrors.name" x-text="nextOfKinErrors.name" class="mt-1 text-xs text-rose-300"></p>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Relationship *</label>
-                  <input x-model="nextOfKin.relationship" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                  <p x-show="nextOfKinErrors.relationship" x-text="nextOfKinErrors.relationship" class="mt-1 text-xs text-rose-300"></p>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Phone *</label>
-                  <input x-model="nextOfKin.phone" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                  <p x-show="nextOfKinErrors.phone" x-text="nextOfKinErrors.phone" class="mt-1 text-xs text-rose-300"></p>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Date of birth</label>
-                  <input x-model="nextOfKin.dob" type="date" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Address</label>
-                  <textarea x-model="nextOfKin.address" rows="2" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white"></textarea>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Email</label>
-                  <input x-model="nextOfKin.email" type="email" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Occupation</label>
-                  <input x-model="nextOfKin.occupation" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Work address</label>
-                  <textarea x-model="nextOfKin.work_address" rows="2" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white"></textarea>
-                </div>
-              </div>
-            </div>
-
-            <!-- Step 2: spouse(s) (optional, repeatable) -->
-            <div x-show="wizardStep === 2" class="space-y-5">
-              <template x-for="(spouse, i) in spouses" :key="i">
-                <div class="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                  <div class="mb-3 flex items-center justify-between">
-                    <p class="text-xs font-semibold uppercase tracking-wider text-teal-300" x-text="'Spouse ' + (i + 1)"></p>
-                    <button type="button" @click="removeSpouse(i)" class="text-xs text-slate-500 hover:text-rose-300">Remove</button>
-                  </div>
-                  <div class="grid grid-cols-2 gap-3">
-                    <div class="col-span-2 sm:col-span-1">
-                      <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Name *</label>
-                      <input x-model="spouse.name" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                    </div>
-                    <div class="col-span-2 sm:col-span-1">
-                      <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Relationship</label>
-                      <input x-model="spouse.relationship" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                    </div>
-                    <div class="col-span-2 sm:col-span-1">
-                      <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Phone</label>
-                      <input x-model="spouse.phone" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                    </div>
-                    <div class="col-span-2 sm:col-span-1">
-                      <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Date of birth</label>
-                      <input x-model="spouse.dob" type="date" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                    </div>
-                    <div class="col-span-2">
-                      <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">PFA</label>
-                      <select x-model.number="spouse.pension_fund_administrator_id" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white">
-                        <option value="">—</option>
-                        <template x-for="p in pfas" :key="p.id">
-                          <option :value="p.id" x-text="p.name"></option>
-                        </template>
-                      </select>
-                    </div>
-                    <div class="col-span-2 sm:col-span-1">
-                      <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">PIN</label>
-                      <input x-model="spouse.pin" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                    </div>
-                    <div class="col-span-2 sm:col-span-1">
-                      <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Equity contribution</label>
-                      <input x-model.number="spouse.equity_contribution" type="number" step="0.01" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                    </div>
-                  </div>
-                </div>
-              </template>
-
-              <button
-                type="button"
-                @click="addSpouse()"
-                class="w-full rounded-xl border border-dashed border-slate-600/60 px-4 py-3 text-sm text-slate-400 transition hover:border-teal-400/40 hover:text-teal-300"
-              >
-                + Add spouse
-              </button>
-            </div>
-
-            <!-- Step 3: referees (exactly 2, required) -->
-            <div x-show="wizardStep === 3" class="space-y-5">
-              <p x-show="refereeErrors.count" x-text="refereeErrors.count" class="text-xs text-rose-300"></p>
-              <template x-for="(referee, i) in referees" :key="i">
-                <div class="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                  <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-teal-300" x-text="'Referee ' + referee.referee_number"></p>
-                  <div class="grid grid-cols-2 gap-3">
-                    <div class="col-span-2 sm:col-span-1">
-                      <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Name *</label>
-                      <input x-model="referee.referee_name" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                      <p x-show="refereeErrors['referee_' + i + '_name']" x-text="refereeErrors['referee_' + i + '_name']" class="mt-1 text-xs text-rose-300"></p>
-                    </div>
-                    <div class="col-span-2 sm:col-span-1">
-                      <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Known period</label>
-                      <input x-model="referee.known_period" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                    </div>
-                    <div class="col-span-2">
-                      <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Current account with</label>
-                      <input x-model="referee.current_account_with" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                    </div>
-                    <div class="col-span-2">
-                      <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Bank name &amp; address</label>
-                      <textarea x-model="referee.bank_name_address" rows="2" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white"></textarea>
-                    </div>
-                    <div class="col-span-2 sm:col-span-1">
-                      <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Referee account number</label>
-                      <input x-model="referee.referee_account_number" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                    </div>
-                    <div class="col-span-2">
-                      <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Suitability comment</label>
-                      <textarea x-model="referee.suitability_comment" rows="2" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white"></textarea>
-                    </div>
-                  </div>
-                </div>
-              </template>
-            </div>
-
-            <!-- Step 4: equity application (optional — all fields nullable server-side) -->
-            <div x-show="wizardStep === 4" class="space-y-4">
-              <p class="rounded-xl border border-slate-600/40 bg-white/[0.02] px-4 py-2.5 text-xs text-slate-400">
-                Optional — fill in whatever the client has on hand today. Every
-                field here can be completed later.
-                <span x-show="core && core.server_id === null">
-                  It'll sync once the client record itself has synced (it needs
-                  a server id first).
-                </span>
+                <i class="fa-solid fa-user-gear text-indigo-400"></i> Personal &
+                Account Setup
+              </h2>
+              <p class="text-[11px] text-slate-400">
+                Basic details. Username is automatically system generated.
               </p>
+            </div>
 
-              <div class="grid grid-cols-2 gap-3">
-                <div class="col-span-2">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Pension fund administrator</label>
-                  <select x-model.number="equityApplication.pension_fund_administrator_id" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white">
-                    <option value="">—</option>
-                    <template x-for="p in pfas" :key="p.id">
-                      <option :value="p.id" x-text="p.name"></option>
-                    </template>
-                  </select>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">PIN</label>
-                  <input x-model="equityApplication.pin" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Mortgage offer type</label>
-                  <select x-model="equityApplication.mortgage_offer_type" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white">
-                    <option value="">—</option>
-                    <template x-for="opt in mortgageOfferTypeOptions" :key="opt.value">
-                      <option :value="opt.value" x-text="opt.label"></option>
-                    </template>
-                  </select>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Mortgage lender name</label>
-                  <input x-model="equityApplication.mortgage_lender_name" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Mortgage account number</label>
-                  <input x-model="equityApplication.mortgage_account_number" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Mortgage lender address</label>
-                  <textarea x-model="equityApplication.mortgage_lender_address" rows="2" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white"></textarea>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Supplementary mortgage lender</label>
-                  <input x-model="equityApplication.supplementary_mortgage_lender" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Property type</label>
-                  <input x-model="equityApplication.property_type" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Property address</label>
-                  <textarea x-model="equityApplication.property_type_address" rows="2" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white"></textarea>
-                </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >First Name *</label
+                >
+                <input
+                  type="text"
+                  x-model="payload.first_name"
+                  @input="updateFullName()"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="John"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Surname *</label
+                >
+                <input
+                  type="text"
+                  x-model="payload.surname"
+                  @input="updateFullName()"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="Doe"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Last Name</label
+                >
+                <input
+                  type="text"
+                  x-model="payload.last_name"
+                  @input="updateFullName()"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="Middle/Other Name"
+                />
+              </div>
 
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Value of property</label>
-                  <input x-model.number="equityApplication.value_of_property" type="number" step="0.01" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Equity per applicant</label>
-                  <input x-model.number="equityApplication.equity_per_applicant" type="number" step="0.01" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Amount of equity payable</label>
-                  <input x-model.number="equityApplication.amount_of_equity_payable" type="number" step="0.01" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Display Name</label
+                >
+                <input
+                  type="text"
+                  x-model="payload.name"
+                  readonly
+                  class="w-full bg-slate-800/50 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 cursor-not-allowed"
+                />
+              </div>
 
-                <div class="col-span-2 sm:col-span-1">
-                  <p class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Evidence of marriage?</p>
-                  <div class="flex gap-2">
-                    <button type="button" @click="setEquityBoolField('evidence_of_marriage', true)" class="flex-1 rounded-xl border px-3 py-2 text-xs font-medium transition" :class="equityApplication.evidence_of_marriage === true ? 'border-teal-400/60 bg-teal-400/15 text-teal-300' : 'border-slate-600/50 text-slate-400'">Yes</button>
-                    <button type="button" @click="setEquityBoolField('evidence_of_marriage', false)" class="flex-1 rounded-xl border px-3 py-2 text-xs font-medium transition" :class="equityApplication.evidence_of_marriage === false ? 'border-teal-400/60 bg-teal-400/15 text-teal-300' : 'border-slate-600/50 text-slate-400'">No</button>
-                    <button type="button" @click="setEquityBoolField('evidence_of_marriage', null)" class="flex-1 rounded-xl border px-3 py-2 text-xs font-medium transition" :class="equityApplication.evidence_of_marriage === null ? 'border-teal-400/60 bg-teal-400/15 text-teal-300' : 'border-slate-600/50 text-slate-400'">Unsure</button>
-                  </div>
+              <!-- System Generated Username -->
+              <div>
+                <div class="flex justify-between items-center mb-1">
+                  <label class="block text-xs font-semibold text-slate-300"
+                    >System Username</label
+                  >
+                  <button
+                    type="button"
+                    @click="generateRandomUsername()"
+                    class="text-[10px] text-indigo-400 hover:text-indigo-300"
+                  >
+                    <i class="fa-solid fa-arrows-rotate"></i> Regenerate
+                  </button>
                 </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <p class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Owner-occupier?</p>
-                  <div class="flex gap-2">
-                    <button type="button" @click="setEquityBoolField('is_owner_occupier', true)" class="flex-1 rounded-xl border px-3 py-2 text-xs font-medium transition" :class="equityApplication.is_owner_occupier === true ? 'border-teal-400/60 bg-teal-400/15 text-teal-300' : 'border-slate-600/50 text-slate-400'">Yes</button>
-                    <button type="button" @click="setEquityBoolField('is_owner_occupier', false)" class="flex-1 rounded-xl border px-3 py-2 text-xs font-medium transition" :class="equityApplication.is_owner_occupier === false ? 'border-teal-400/60 bg-teal-400/15 text-teal-300' : 'border-slate-600/50 text-slate-400'">No</button>
-                    <button type="button" @click="setEquityBoolField('is_owner_occupier', null)" class="flex-1 rounded-xl border px-3 py-2 text-xs font-medium transition" :class="equityApplication.is_owner_occupier === null ? 'border-teal-400/60 bg-teal-400/15 text-teal-300' : 'border-slate-600/50 text-slate-400'">Unsure</button>
-                  </div>
+                <div class="relative">
+                  <span class="absolute left-3 py-2 text-slate-500 text-xs"
+                    >@</span
+                  >
+                  <input
+                    type="text"
+                    x-model="payload.username"
+                    readonly
+                    class="w-full bg-slate-800/60 border border-slate-800 rounded-lg pl-7 pr-3 py-2 text-xs text-indigo-300 font-mono font-semibold cursor-not-allowed"
+                  />
                 </div>
+              </div>
 
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Occupation</label>
-                  <input x-model="equityApplication.occupation" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Present position</label>
-                  <input x-model="equityApplication.present_position" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Date employed</label>
-                  <input x-model="equityApplication.date_employed" type="date" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Telephone number</label>
-                  <input x-model="equityApplication.telephone_no" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Office address</label>
-                  <textarea x-model="equityApplication.office_address" rows="2" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white"></textarea>
-                </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Email Address *</label
+                >
+                <input
+                  type="email"
+                  x-model="payload.email"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="john@example.com"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Password *</label
+                >
+                <input
+                  type="password"
+                  x-model="payload.password"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="••••••••"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Phone Number *</label
+                >
+                <input
+                  type="tel"
+                  x-model="payload.phone_number"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="+1 (555) 000-0000"
+                />
+              </div>
 
-                <div class="col-span-2">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Purpose of loan</label>
-                  <textarea x-model="equityApplication.purpose_of_loan" rows="2" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white"></textarea>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Account Type</label
+                >
+                <select
+                  x-model="payload.account_type"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="standard">Standard Client</option>
+                  <option value="agent">Agent</option>
+                  <option value="personal">Personal</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Gender</label
+                >
+                <select
+                  x-model="payload.gender"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">Select Gender</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- STEP 2: Address & Location Info -->
+          <div
+            x-show="currentStep === 2"
+            class="p-4 sm:p-6 space-y-4"
+            x-transition:enter="transition ease-out duration-200 transform opacity-0 translate-x-2"
+            x-transition:enter-end="opacity-100 translate-x-0"
+          >
+            <div class="border-b border-slate-800 pb-3">
+              <h2
+                class="text-base font-bold text-white flex items-center gap-2"
+              >
+                <i class="fa-solid fa-location-dot text-indigo-400"></i>
+                Location & Address Info
+              </h2>
+              <p class="text-[11px] text-slate-400">
+                Residential and country geographical information.
+              </p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Country</label
+                >
+                <select
+                  x-model="payload.country_id"
+                  @change="onCountryChange()"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">Select Country</option>
+                  <template x-for="c in countries" :key="c.id">
+                    <option :value="c.id" x-text="c.name"></option>
+                  </template>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >State / Region</label
+                >
+                <select
+                  x-model="payload.state_id"
+                  @change="onStateChange()"
+                  :disabled="!payload.country_id"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                >
+                  <option value="">Select State</option>
+                  <template x-for="s in filteredStates" :key="s.id">
+                    <option :value="s.id" x-text="s.name"></option>
+                  </template>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >City</label
+                >
+                <select
+                  x-model="payload.city_id"
+                  :disabled="!payload.state_id"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                >
+                  <option value="">Select City</option>
+                  <template x-for="ct in filteredCities" :key="ct.id">
+                    <option :value="ct.id" x-text="ct.name"></option>
+                  </template>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Nationality</label
+                >
+                <input
+                  type="text"
+                  x-model="payload.nationality"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="e.g. Nigerian"
+                />
+              </div>
+
+              <div class="sm:col-span-2">
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Residential Address</label
+                >
+                <input
+                  type="text"
+                  x-model="payload.residential_address"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="Full residential location"
+                />
+              </div>
+
+              <div class="flex items-center pt-2">
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    x-model="payload.is_rented"
+                    class="sr-only peer"
+                  />
+                  <div
+                    class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"
+                  ></div>
+                  <span class="ml-2.5 text-xs text-slate-300"
+                    >Is Property Rented?</span
+                  >
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- STEP 3: Identification & Employment -->
+          <div
+            x-show="currentStep === 3"
+            class="p-4 sm:p-6 space-y-4"
+            x-transition:enter="transition ease-out duration-200 transform opacity-0 translate-x-2"
+            x-transition:enter-end="opacity-100 translate-x-0"
+          >
+            <div class="border-b border-slate-800 pb-3">
+              <h2
+                class="text-base font-bold text-white flex items-center gap-2"
+              >
+                <i class="fa-solid fa-id-card text-indigo-400"></i> Verification
+                & Employment
+              </h2>
+              <p class="text-[11px] text-slate-400">
+                Identity codes, employment detail, and security PIN.
+              </p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >NIN (National ID)</label
+                >
+                <input
+                  type="text"
+                  x-model="payload.nin"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="11-digit NIN"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >BVN (Bank Verification)</label
+                >
+                <input
+                  type="text"
+                  x-model="payload.bvn"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="11-digit BVN"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Occupation</label
+                >
+                <input
+                  type="text"
+                  x-model="payload.occupation"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="Software Engineer"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Office Position</label
+                >
+                <input
+                  type="text"
+                  x-model="payload.office_position"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="Senior Manager"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Security PIN (4-Digits)</label
+                >
+                <input
+                  type="password"
+                  maxlength="4"
+                  x-model="payload.pin"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 tracking-widest"
+                  placeholder="••••"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- STEP 4: Next of Kin & Referee -->
+          <div
+            x-show="currentStep === 4"
+            class="p-4 sm:p-6 space-y-4"
+            x-transition:enter="transition ease-out duration-200 transform opacity-0 translate-x-2"
+            x-transition:enter-end="opacity-100 translate-x-0"
+          >
+            <div class="border-b border-slate-800 pb-3">
+              <h2
+                class="text-base font-bold text-white flex items-center gap-2"
+              >
+                <i class="fa-solid fa-users text-indigo-400"></i> Next of Kin &
+                Referee
+              </h2>
+              <p class="text-[11px] text-slate-400">
+                Emergency contact person and referee information.
+              </p>
+            </div>
+
+            <!-- Next of Kin Box -->
+            <div
+              class="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 space-y-3"
+            >
+              <h3
+                class="text-xs font-bold text-indigo-400 flex items-center gap-1.5"
+              >
+                <i class="fa-solid fa-user-shield"></i> Next of Kin
+              </h3>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[11px] text-slate-300 mb-1"
+                    >First Name</label
+                  >
+                  <input
+                    type="text"
+                    x-model="payload.next_of_kin.first_name"
+                    @input="updateKinName()"
+                    class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                  />
                 </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Loan amount</label>
-                  <input x-model.number="equityApplication.loan_amount" type="number" step="0.01" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
+                <div>
+                  <label class="block text-[11px] text-slate-300 mb-1"
+                    >Surname</label
+                  >
+                  <input
+                    type="text"
+                    x-model="payload.next_of_kin.surname"
+                    @input="updateKinName()"
+                    class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                  />
                 </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Repayment period</label>
-                  <input x-model="equityApplication.repayment_period" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
+                <div>
+                  <label class="block text-[11px] text-slate-300 mb-1"
+                    >Relationship</label
+                  >
+                  <input
+                    type="text"
+                    x-model="payload.relation_with_kin"
+                    class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                    placeholder="Spouse / Sibling"
+                  />
                 </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Monthly salary income</label>
-                  <input x-model.number="equityApplication.monthly_salary_income" type="number" step="0.01" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
-                </div>
-                <div class="col-span-2">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Source of loan repayment</label>
-                  <textarea x-model="equityApplication.source_of_loan_repayment" rows="2" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white"></textarea>
-                </div>
-                <div class="col-span-2 sm:col-span-1">
-                  <label class="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-400">Declaration date</label>
-                  <input x-model="equityApplication.declaration_date" type="date" class="field-input w-full rounded-xl px-3.5 py-2.5 text-sm text-white" />
+                <div>
+                  <label class="block text-[11px] text-slate-300 mb-1"
+                    >Kin Phone</label
+                  >
+                  <input
+                    type="tel"
+                    x-model="payload.next_of_kin.phone_number"
+                    class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                  />
                 </div>
               </div>
             </div>
 
-            <!-- Step 5: review & submit -->
-            <div x-show="wizardStep === 5" class="space-y-4 text-sm">
-              <div class="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-teal-300">Client</p>
-                <p class="text-white" x-text="[core.first_name, core.middle_name, core.surname].filter(Boolean).join(' ') || 'Untitled client'"></p>
-                <p class="text-slate-400" x-text="core.phone_no || 'No phone number'"></p>
+            <!-- Referee Box -->
+            <div
+              class="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 space-y-3"
+            >
+              <h3
+                class="text-xs font-bold text-indigo-400 flex items-center gap-1.5"
+              >
+                <i class="fa-solid fa-user-check"></i> Referee Reference
+              </h3>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[11px] text-slate-300 mb-1"
+                    >Referee Full Name</label
+                  >
+                  <input
+                    type="text"
+                    x-model="payload.referee.referee_name"
+                    class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label class="block text-[11px] text-slate-300 mb-1"
+                    >Referee Phone</label
+                  >
+                  <input
+                    type="tel"
+                    x-model="payload.referee.referee_number"
+                    class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                  />
+                </div>
               </div>
-              <div class="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-teal-300">Next of kin</p>
-                <p class="text-slate-300" x-show="hasNextOfKin" x-text="nextOfKin.name + ' (' + nextOfKin.relationship + ')'"></p>
-                <p class="text-slate-500" x-show="!hasNextOfKin">None provided</p>
+            </div>
+          </div>
+
+          <!-- STEP 5: Equity & Bank Details -->
+          <div
+            x-show="currentStep === 5"
+            class="p-4 sm:p-6 space-y-4"
+            x-transition:enter="transition ease-out duration-200 transform opacity-0 translate-x-2"
+            x-transition:enter-end="opacity-100 translate-x-0"
+          >
+            <div class="border-b border-slate-800 pb-3">
+              <h2
+                class="text-base font-bold text-white flex items-center gap-2"
+              >
+                <i class="fa-solid fa-house-circle-check text-indigo-400"></i>
+                Equity & Bank Details
+              </h2>
+              <p class="text-[11px] text-slate-400">
+                Mortgage preferences, loan amount, and payout bank info.
+              </p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Mortgage Lender</label
+                >
+                <input
+                  type="text"
+                  x-model="payload.equity_application.morgage_lender"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="Lender Name"
+                />
               </div>
-              <div class="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-teal-300">Spouses</p>
-                <p class="text-slate-500" x-show="spouses.length === 0">None</p>
-                <p class="text-slate-300" x-show="spouses.length > 0" x-text="spouses.length + ' spouse(s) added'"></p>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Property Value (₦)</label
+                >
+                <input
+                  type="number"
+                  x-model.number="payload.equity_application.property_value"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                />
               </div>
-              <div class="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-teal-300">Referees</p>
-                <p class="text-slate-300" x-text="referees.filter(r => r.referee_name?.trim()).length + ' of 2 named'"></p>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Loan Required (₦)</label
+                >
+                <input
+                  type="number"
+                  x-model.number="payload.meta.amount_of_loan_required"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                />
               </div>
-              <div class="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-teal-300">Equity application</p>
-                <p class="text-slate-300" x-text="Object.values(equityApplication).some(v => v !== null && v !== '') ? 'Some details provided' : 'Not started — optional, can be added later'"></p>
-                <p class="mt-1 text-xs text-slate-500" x-show="core && core.server_id === null">
-                  Will sync once this client itself has synced.
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1"
+                  >Monthly Income (₦)</label
+                >
+                <input
+                  type="number"
+                  x-model.number="payload.meta.monthly_salary_or_income"
+                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            <!-- Bank Details -->
+            <div
+              class="bg-indigo-950/30 border border-indigo-900/50 p-3 rounded-xl space-y-2.5"
+            >
+              <h4
+                class="text-[11px] font-bold uppercase tracking-wider text-indigo-400"
+              >
+                Payout Bank Details
+              </h4>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label class="block text-[11px] text-slate-300 mb-1"
+                    >Account Name</label
+                  >
+                  <input
+                    type="text"
+                    x-model="payload.bank.account_name"
+                    class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label class="block text-[11px] text-slate-300 mb-1"
+                    >Account Number</label
+                  >
+                  <input
+                    type="text"
+                    x-model="payload.bank.account_number"
+                    class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- STEP 6: Review & Submit -->
+          <div
+            x-show="currentStep === 6"
+            class="p-4 sm:p-6 space-y-4"
+            x-transition:enter="transition ease-out duration-200 transform opacity-0 translate-x-2"
+            x-transition:enter-end="opacity-100 translate-x-0"
+          >
+            <div
+              class="border-b border-slate-800 pb-3 flex justify-between items-center"
+            >
+              <div>
+                <h2
+                  class="text-base font-bold text-white flex items-center gap-2"
+                >
+                  <i class="fa-solid fa-clipboard-check text-indigo-400"></i>
+                  Review Client Data
+                </h2>
+                <p class="text-[11px] text-slate-400">
+                  Ready to save to local storage.
                 </p>
               </div>
-              <p class="text-xs text-slate-500">
-                Submitting saves the client locally as ready-to-sync. It will
-                upload automatically next time the app is online — you don't
-                need to stay connected.
-              </p>
+              <span
+                x-show="isEditMode"
+                class="text-[10px] px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800"
+                >Editing Mode</span
+              >
             </div>
 
-            <!-- Wizard nav -->
-            <div class="mt-6 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                @click="backToDashboard()"
-                class="rounded-xl px-3 py-2 text-xs font-medium text-slate-400 transition hover:text-slate-200"
+            <div class="grid grid-cols-1 gap-2.5 text-xs">
+              <div
+                class="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1"
               >
-                &larr; All clients
-              </button>
-              <div class="flex items-center gap-2">
-                <button
-                  type="button"
-                  x-show="wizardStep > 0"
-                  @click="prevStep()"
-                  class="rounded-xl border border-slate-600/60 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-teal-400/40"
-                >
-                  Back
-                </button>
-                <button
-                  type="button"
-                  x-show="wizardStep < wizardSteps.length - 1"
-                  @click="nextStep()"
-                  class="btn-primary rounded-xl px-5 py-2.5 text-sm font-semibold"
-                >
-                  Next
-                </button>
-                <button
-                  type="button"
-                  x-show="wizardStep === wizardSteps.length - 1"
-                  :disabled="saving"
-                  @click="submitClient()"
-                  class="btn-primary rounded-xl px-5 py-2.5 text-sm font-semibold"
-                >
-                  <span x-text="saving ? 'Saving…' : 'Submit client'"></span>
-                </button>
+                <p>
+                  <span class="text-slate-500">Client ID:</span>
+                  <span
+                    class="text-indigo-400 font-mono font-bold"
+                    x-text="payload.client_id"
+                  ></span>
+                </p>
+                <p>
+                  <span class="text-slate-500">Full Name:</span>
+                  <span
+                    class="text-slate-200 font-medium"
+                    x-text="payload.name || 'N/A'"
+                  ></span>
+                </p>
+                <p>
+                  <span class="text-slate-500">Username:</span>
+                  <span
+                    class="text-indigo-300 font-mono"
+                    x-text="'@' + payload.username"
+                  ></span>
+                </p>
+                <p>
+                  <span class="text-slate-500">Email:</span>
+                  <span
+                    class="text-slate-200"
+                    x-text="payload.email || 'N/A'"
+                  ></span>
+                </p>
+                <p>
+                  <span class="text-slate-500">Phone:</span>
+                  <span
+                    class="text-slate-200"
+                    x-text="payload.phone_number || 'N/A'"
+                  ></span>
+                </p>
+              </div>
+
+              <div
+                class="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1"
+              >
+                <p>
+                  <span class="text-slate-500">Next of Kin:</span>
+                  <span
+                    class="text-slate-200"
+                    x-text="payload.next_of_kin.name || 'N/A'"
+                  ></span>
+                </p>
+                <p>
+                  <span class="text-slate-500">Loan Amount:</span>
+                  <span
+                    class="text-emerald-400 font-semibold"
+                    x-text="`₦${payload.meta.amount_of_loan_required || 0}`"
+                  ></span>
+                </p>
               </div>
             </div>
           </div>
-        </template>
+
+          <!-- Footer Mobile Form Controls -->
+          <div
+            class="bg-slate-950 px-4 py-3 border-t border-slate-800 flex items-center justify-between"
+          >
+            <button
+              @click="prevStep()"
+              :disabled="currentStep === 1 || loading"
+              class="px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-30 transition"
+            >
+              <i class="fa-solid fa-chevron-left mr-1"></i> Back
+            </button>
+
+            <template x-if="currentStep < steps.length">
+              <button
+                @click="nextStep()"
+                class="px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition"
+              >
+                Next <i class="fa-solid fa-chevron-right ml-1"></i>
+              </button>
+            </template>
+
+            <template x-if="currentStep === steps.length">
+              <button
+                @click="save_client()"
+                :disabled="loading"
+                class="px-5 py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 transition flex items-center gap-1.5"
+              >
+                <i class="fa-solid fa-floppy-disk"></i>
+                <span
+                  x-text="isEditMode ? 'Update Client' : 'Save to Storage'"
+                ></span>
+              </button>
+            </template>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Modal: Client Detailed Preview -->
+    <div
+      x-show="showPreviewModal"
+      x-cloak
+      class="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-sm"
+      x-transition
+    >
+      <div
+        class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[85vh]"
+      >
+        <div
+          class="px-4 py-3 border-b border-slate-800 flex items-center justify-between bg-slate-950"
+        >
+          <div class="flex items-center gap-2">
+            <h3 class="text-xs font-bold text-white">Client Detail Preview</h3>
+            <span
+              class="text-[10px] text-indigo-400 font-mono"
+              x-text="selectedPreview?.client_id"
+            ></span>
+          </div>
+          <button
+            @click="showPreviewModal = false"
+            class="text-slate-400 hover:text-white"
+          >
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <div class="p-4 overflow-y-auto space-y-3 text-xs">
+          <template x-if="selectedPreview">
+            <div class="space-y-3">
+              <div
+                class="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1"
+              >
+                <div
+                  class="font-bold text-indigo-400 uppercase text-[10px] tracking-wider mb-1"
+                >
+                  Personal Details
+                </div>
+                <p class="text-slate-300">
+                  <span class="text-slate-500">Name:</span>
+                  <strong x-text="selectedPreview.name"></strong>
+                </p>
+                <p class="text-slate-300">
+                  <span class="text-slate-500">Username:</span>
+                  <span
+                    class="font-mono text-indigo-300"
+                    x-text="'@' + selectedPreview.username"
+                  ></span>
+                </p>
+                <p class="text-slate-300">
+                  <span class="text-slate-500">Email:</span>
+                  <span x-text="selectedPreview.email"></span>
+                </p>
+                <p class="text-slate-300">
+                  <span class="text-slate-500">Phone:</span>
+                  <span x-text="selectedPreview.phone_number"></span>
+                </p>
+              </div>
+
+              <div
+                class="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1"
+              >
+                <div
+                  class="font-bold text-indigo-400 uppercase text-[10px] tracking-wider mb-1"
+                >
+                  Verification & Employment
+                </div>
+                <p class="text-slate-300">
+                  <span class="text-slate-500">NIN:</span>
+                  <span x-text="selectedPreview.nin || 'N/A'"></span>
+                </p>
+                <p class="text-slate-300">
+                  <span class="text-slate-500">BVN:</span>
+                  <span x-text="selectedPreview.bvn || 'N/A'"></span>
+                </p>
+                <p class="text-slate-300">
+                  <span class="text-slate-500">Occupation:</span>
+                  <span x-text="selectedPreview.occupation || 'N/A'"></span>
+                </p>
+              </div>
+
+              <div
+                class="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1"
+              >
+                <div
+                  class="font-bold text-indigo-400 uppercase text-[10px] tracking-wider mb-1"
+                >
+                  Financial & Loan
+                </div>
+                <p class="text-slate-300">
+                  <span class="text-slate-500">Required Loan:</span>
+                  <span
+                    class="text-emerald-400 font-bold"
+                    x-text="`₦${selectedPreview.meta?.amount_of_loan_required || 0}`"
+                  ></span>
+                </p>
+                <p class="text-slate-300">
+                  <span class="text-slate-500">Bank Account:</span>
+                  <span
+                    x-text="`${selectedPreview.bank?.account_name || 'N/A'} (${selectedPreview.bank?.account_number || 'N/A'})`"
+                  ></span>
+                </p>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div
+          class="px-4 py-3 bg-slate-950 border-t border-slate-800 flex justify-end gap-2"
+        >
+          <button
+            @click="showPreviewModal = false"
+            class="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs"
+          >
+            Close
+          </button>
+          <button
+            @click="showPreviewModal = false; editClient(selectedPreview)"
+            class="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-semibold"
+          >
+            Edit Client
+          </button>
+        </div>
       </div>
     </div>
+
+    <!-- Modal: Live JSON Payload -->
+    <div
+      x-show="showPayloadModal"
+      x-cloak
+      class="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-sm"
+      x-transition
+    >
+      <div
+        class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]"
+      >
+        <div
+          class="px-4 py-3 border-b border-slate-800 flex items-center justify-between bg-slate-950"
+        >
+          <h3 class="text-xs font-bold text-white flex items-center gap-1.5">
+            <i class="fa-solid fa-code text-indigo-400"></i> JSON Object Preview
+          </h3>
+          <button
+            @click="showPayloadModal = false"
+            class="text-slate-400 hover:text-white"
+          >
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        <div
+          class="p-4 overflow-y-auto flex-1 font-mono text-[11px] text-emerald-400 bg-slate-950 leading-relaxed"
+        >
+          <pre x-text="JSON.stringify(payload, null, 2)"></pre>
+        </div>
+      </div>
+    </div>
+
+    <footer
+      class="border-t border-slate-900 py-3 text-center text-[11px] text-slate-600"
+    >
+      Mobile-First Realtor Onboarding Wizard
+    </footer>
   </body>
 </html>

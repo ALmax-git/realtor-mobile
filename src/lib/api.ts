@@ -69,10 +69,11 @@ export async function login(
 
   let response: Response;
   try {
-    response = await fetch(`${apiBase}/api/login`, {
+    response = await fetch(`${apiBase}/api/v1/auth/login`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Xsource: "com.realtor.agent",
         Accept: "application/json",
       },
       body: JSON.stringify({
@@ -93,11 +94,13 @@ export async function login(
   }
 
   const data = await response.json();
-  if (typeof data?.token !== "string") {
+  let token = data?.data?.token ?? data?.data?.user.token;
+  console.log(data, data?.token, data?.user?.token, token);
+  if (typeof token !== "string") {
     throw new ApiError("Unexpected response from server.", response.status);
   }
 
-  return { token: data.token };
+  return { token: token };
 }
 
 /**
