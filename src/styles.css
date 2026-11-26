@@ -3,3 +3,119 @@
 @import '@fortawesome/fontawesome-free/css/all.min.css';
 @import "bootstrap-icons/font/bootstrap-icons.css";
 @import 'glightbox/dist/css/glightbox.min.css';
+
+:root.dark {
+    --text: #eee;
+    --text2: #aaa;
+    --bg: #000000;
+    --bg50: #00000065;
+    --bg70: #1111118d;
+    --sd: #000000a0;
+    --card: #72727240;
+    --hover: #aaaaaa30;
+    --hover-half: #ffffff20;
+    --hover-b: #eeeeee0f;
+    --bggrey: #444;
+    --fill: #99999970;
+    --mm: #ffffff50;
+    --cm: #292929bb;
+    --bar: #7272722a;
+    --hr: #333;
+    --unfoc: #202020;
+    --msg: #303030d0;
+    --bd: #ffffff06;
+    --s3d: #11111150;
+    --mica: linear-gradient(215deg, #2d161c, #102d53);
+}
+
+.input {
+    background-color: var(--bg50);
+    border: none;
+    border-bottom: 2.5px solid;
+    border-bottom-color: #979797;
+    border-radius: 7px;
+    padding: 3px 5px 3px 8px;
+    outline: medium;
+    width: 100%;
+    color: var(--text);
+    transition: 100ms, border 0s;
+    box-shadow: 0 1px 2px var(--s3d);
+}
+
+select.input {
+    appearance: none;
+    -webkit-appearance: none;
+
+    width: 100%;
+    padding: 8px 30px 8px 10px;
+
+    color: var(--text);
+    background-color: var(--bg50);
+
+    border: 1px solid transparent;
+    border-bottom: 1.5px solid #979797;
+    border-radius: 5px;
+
+    outline: none;
+    cursor: pointer;
+
+    transition: border-color 150ms ease, background-color 150ms ease;
+
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23979797' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+}
+
+select.input:hover {
+    border-bottom-color: var(--text);
+}
+
+select.input:focus {
+    border-bottom-color: var(--primary, #06b6d4);
+    background-color: var(--bg);
+}
+
+select.input option {
+    background-color: var(--bg);
+    color: var(--text);
+}
+
+.input.cool {
+    border-radius: 0px !important;
+}
+
+.input:hover {
+    background: var(--cm);
+}
+
+.input:focus {
+    background-color: var(--bg);
+    background-clip: padding-box, border-box;
+    background-origin: padding-box, border-box;
+    background-image: linear-gradient(var(--bg), var(--bg)), linear-gradient(90deg, var(--theme-1), var(--theme-2));
+    border-bottom-color: blue;
+    box-shadow: 0 1px 10px var(--s3d);
+    opacity: 1;
+}
+
+.input.active {
+    background-color: var(--bg);
+    background-clip: padding-box, border-box;
+    background-origin: padding-box, border-box;
+    background-image: linear-gradient(var(--bg), var(--bg)), linear-gradient(90deg, var(--theme-1), var(--theme-2));
+    border-bottom-color: transparent;
+    box-shadow: 0 1px 10px var(--s3d);
+    opacity: 1;
+}
+
+input.foc {
+    display: block;
+    height: 0;
+    width: 0;
+    opacity: 0;
+    padding: 0;
+    margin: 0;
+    border: none;
+    outline: none;
+    background: none;
+}

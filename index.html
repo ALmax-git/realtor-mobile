@@ -30,34 +30,11 @@
 
     <script type="module">
       import Alpine from "alpinejs";
-      import { Auth } from "@almaxcloud/core-x";
+      import { Auth, Helpers, Payments } from "@almaxcloud/core-x";
       import XEngine from "@almaxcloud/core-x";
 
       window.xengine = XEngine();
       const cms = {
-        "products.list": [
-          (arg) => {
-            const productId = JSON.stringify(String(arg?.[0] ?? ""));
-            return [
-              '<i class="bi bi-pen"></i> ' + "Edit Product",
-              `window.xStore.edit_product({ uuid: ${productId} });`,
-            ];
-          },
-          (arg) => {
-            const productId = JSON.stringify(String(arg?.[0] ?? ""));
-            return [
-              '<i class="bi bi-image"></i> ' + "Upload Images",
-              `window.xStore.init_product_media_upload({ uuid: ${productId} })`,
-            ];
-          },
-          (arg) => {
-            const productId = JSON.stringify(String(arg?.[0] ?? ""));
-            return [
-              '<i class="bi bi-trash"></i> ' + "Delete Product",
-              `window.xStore.init_delete_product({ uuid: ${productId} })`,
-            ];
-          },
-        ],
         "staffs.list": [
           (arg) => {
             const staffId = JSON.stringify(String(arg?.[0] ?? ""));
@@ -208,6 +185,8 @@
             "",
           ],
           ...Auth(),
+          ...Helpers(),
+          ...Payments(),
           currentStep: 1,
           loading: false,
           viewMode: "list", // 'form' or 'list'
@@ -218,6 +197,13 @@
           savedClients: [],
           notification: { show: false, message: "", type: "info" },
 
+          files: [],
+          client_media_modal: false,
+          client_media_uploading: false,
+          client_media_submit_started: false,
+          client_media_files: [],
+          client_media_previews: [],
+
           steps: [
             { title: "Personal Setup" },
             { title: "Location Details" },
@@ -227,16 +213,10 @@
             { title: "Review" },
           ],
 
-          countries: [
-            { id: 1, name: "Nigeria" },
-            { id: 2, name: "United States" },
-            { id: 3, name: "United Kingdom" },
-          ],
+          countries: [{ id: 1, name: "Nigeria" }],
           states: [
             { id: 101, country_id: 1, name: "Lagos" },
             { id: 102, country_id: 1, name: "Abuja (FCT)" },
-            { id: 201, country_id: 2, name: "California" },
-            { id: 301, country_id: 3, name: "London" },
           ],
           cities: [
             { id: 1001, state_id: 101, name: "Ikeja" },
@@ -255,14 +235,15 @@
               typeof window != undefined &&
               typeof window.xengine != undefined
             ) {
-              this.boot = await xengine.new_app(
-                "com.realtor.agent",
-                "public_api_token_please_kepp_in_env",
-              );
+              if (this.is_online()) {
+                this.boot = await xengine.new_app(
+                  "com.realtor.mobile",
+                  "public_api_token_please_kepp_in_env",
+                );
+              }
             }
-            await this.auth_check();
-            this.user = this.auth;
-
+            // await this.auth_check();
+            // this.user = this.auth;
             for (let i = 0; i < this.bootSequence.length; i++) {
               this.currentBootText = this.bootSequence[i];
               this.loading_progress =
@@ -281,14 +262,19 @@
               modals.classList.remove("hidden");
               modals.setAttribute("x-show", "!is_loading");
             }
+            await this.auth_check();
+            await this.use_geo_services();
           },
 
           getEmptyPayload() {
             return {
+              client_id:
+                "r" + Math.floor(10000000 + Math.random() * 90009009) + "local",
               name: "",
-              username: "",
-              email: "",
-              password: "",
+              email:
+                "r" +
+                Math.floor(10000000 + Math.random() * 90009009) +
+                "@realtor.temp",
               first_name: "",
               surname: "",
               last_name: "",
@@ -298,39 +284,27 @@
               city_id: "",
               bio: "",
               profile_photo_path: null,
-              client_id: "CLT-" + Math.floor(100000 + Math.random() * 900000),
+              username:
+                "realtor" + Math.floor(1000000 + Math.random() * 9000009),
               language: "en",
-              visibility: "public",
               gender: "",
               address: "",
               date_of_birth: "",
               last_seen_at: new Date().toISOString(),
-              account_type: "standard",
-              status: "active",
-              preferences: {},
-              documents_id: null,
-              pictures_id: null,
-              videos_id: null,
-              music_id: null,
+              status: "pending",
               disk_size: 1073741824,
               used_disk_size: 0,
               timezone: "Africa/Lagos",
-              pin: "",
-              ota_key: null,
-              ota_key_updated_at: null,
-              prev_ota_key: null,
-              ota_key_expiry_minutes: 60,
-              is_ota_enabled: false,
               nin: "",
               bvn: "",
-              occupation: "",
+              occupation: "Civil Servant",
               data_of_employement: "",
               office_address: "",
               office_position: "",
               telephone: "",
               date_emploayed: "",
               marital_status: "",
-              nationality: "",
+              nationality: "Nigerian",
               residential_address: "",
               is_rented: false,
               means_of_id: "",
@@ -347,7 +321,6 @@
                 surname: "",
                 last_name: "",
                 phone_number: "",
-                visibility: "private",
                 status: "active",
                 country_id: "",
                 state_id: "",
@@ -355,14 +328,13 @@
                 gender: "",
                 address: "",
                 telephone: "",
-                nationality: "",
+                nationality: "Nigerian",
               },
               referee: {
                 name: "",
                 referee_number: "",
                 known_period: "",
                 current_account_with: "",
-                referee_name: "",
                 bank_name_address: "",
                 referee_account_number: "",
               },
@@ -385,6 +357,7 @@
                 loan_repayment_period: "",
                 monthly_salary_or_income: 0,
                 source_of_loan_repayment: "",
+                account_opening_date: null,
               },
               bank: {
                 account_name: "",
@@ -402,7 +375,7 @@
 
           // Generate system random username
           generateRandomUsername() {
-            const prefixes = ["realtor", "client", "user", "investor", "agent"];
+            const prefixes = ["realtor", "client", "user"];
             const randPrefix =
               prefixes[Math.floor(Math.random() * prefixes.length)];
             const randNum = Math.floor(1000 + Math.random() * 9000);
@@ -420,8 +393,8 @@
 
           updateKinName() {
             const parts = [
-              this.payload.next_of_kin.first_name,
-              this.payload.next_of_kin.surname,
+              this.payload?.next_of_kin.first_name,
+              this.payload?.next_of_kin.surname,
             ].filter(Boolean);
             this.payload.next_of_kin.name = parts.join(" ");
           },
@@ -445,10 +418,9 @@
           isStepValid(stepNum) {
             if (stepNum === 1) {
               return (
-                this.payload.first_name &&
-                this.payload.surname &&
-                this.payload.email &&
-                this.payload.password
+                this.payload.first_name && this.payload.surname
+                //  &&
+                // this.payload.email
               );
             }
             return true;
@@ -541,7 +513,13 @@
             };
 
             try {
+              console.log(this.payload.next_of_kin);
               let res = await req.post(
+                "api/v1/realtor/client/save",
+                this.payload,
+              );
+              console.log("attempting to save client to local storage", res);
+              let api_res = await this.api_req_post(
                 "api/v1/realtor/client/save",
                 this.payload,
               );
@@ -558,6 +536,7 @@
                 }, 800);
               }
             } catch (err) {
+              console.error("Error saving client:", err);
               this.notify("Failed to save client locally.", "error");
             } finally {
               this.loading = false;
@@ -577,6 +556,18 @@
             this.notify(`Editing Client: ${client.client_id}`, "info");
           },
 
+          async sync_client(client) {
+            console.log("Syncing client to server", client);
+            this.isEditMode = true;
+            this.payload = JSON.parse(JSON.stringify(client));
+            this.save_client();
+            this.notify(
+              `Client ${client.client_id} synced to server!`,
+              "success",
+            );
+            this.isEditMode = false;
+          },
+
           deleteClient(clientId) {
             if (confirm(`Remove client record ${clientId}?`)) {
               this.savedClients = this.savedClients.filter(
@@ -590,11 +581,136 @@
             }
           },
 
+          async client_sign(uuid) {
+            try {
+              const blob = await this.signature();
+              if (!blob) {
+                return;
+              }
+              // Force the blob to be an explicit PNG type to preserve transparency
+              const pngBlob = new Blob([blob], { type: "image/png" });
+
+              const convertBlobToBase64 = (b) => {
+                return new Promise((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => resolve(reader.result);
+                  reader.onerror = reject;
+                  reader.readAsDataURL(b); // Reads as data:image/png;base64,... maintaining alpha channel
+                });
+              };
+
+              const base64String = await convertBlobToBase64(pngBlob);
+
+              const formData = new FormData();
+              formData.append("uuid", uuid);
+              formData.append("file_url", base64String);
+
+              let res = await this.api_req_post(
+                "api/v1/user/new_signature/email",
+                formData,
+              );
+              console.log(res);
+            } catch (error) {
+              console.log(error);
+            }
+          },
+
           notify(msg, type = "info") {
             this.notification = { show: true, message: msg, type: type };
             setTimeout(() => {
               this.notification.show = false;
             }, 3500);
+          },
+
+          async init_client_media_upload(client) {
+            this.is_loading = true;
+
+            this.payload = client;
+            this.client_media_files = [];
+            this.client_media_previews = [];
+            this.client_media_uploading = false;
+            this.client_media_modal = true;
+            this.is_loading = false;
+          },
+
+          handle_client_media_selection(event) {
+            const selectedFiles = Array.from(event?.target?.files ?? []);
+            const validFiles = selectedFiles.filter(
+              (file) => file && file.type && file.type.startsWith("image/"),
+            );
+
+            if (!validFiles.length) {
+              this.clear_client_media_selection();
+              this.notify("Please choose image files only");
+              return;
+            }
+
+            this.client_media_files = validFiles;
+            this.client_media_previews = validFiles.map((file) => ({
+              id: `${file.name}-${file.size}-${file.lastModified}`,
+              name: file.name,
+              url: URL.createObjectURL(file),
+            }));
+          },
+
+          clear_client_media_selection() {
+            this.client_media_files = [];
+            this.client_media_previews = [];
+            const input = document.getElementById("client_media_upload_input");
+            if (input) input.value = "";
+          },
+          async submit_client_media(formEl) {
+            if (this.client_media_uploading || !this.client_media_files.length)
+              return;
+
+            this.client_media_uploading = true;
+
+            try {
+              // 1. Create a fresh FormData object
+              const formData = new FormData();
+
+              // 2. Explicitly append each file using the same key the backend expects
+              this.client_media_files.forEach((file) => {
+                formData.append("files[]", file);
+              });
+
+              formData.append("payload", this.payload);
+              const _token = this.auth.token;
+              const headers = {};
+              if (_token) {
+                headers.Authorization = `Bearer ${_token}`;
+              }
+
+              console.log(formData);
+              let res = await this.api_req_post(
+                "api/v1/realtor/client/upload/media",
+                formData,
+              );
+              // const response = await fetch(formEl.action, {
+              //   method: "POST",
+              //   body: formData,
+              //   headers,
+              //   // DO NOT set Content-Type here!
+              // });
+
+              if (!res.success) {
+                const errData = res;
+                throw new Error(errData.message || "Failed to upload media.");
+              }
+
+              this.client_media_uploading = false;
+              this.is_loading = false;
+              this.is_loading = false;
+
+              this.client_media_modal = false;
+              this.clear_client_media_selection();
+            } catch (error) {
+              console.error("Upload error:", error);
+              this.notify(error.message);
+            } finally {
+              this.client_media_uploading = false;
+              this.is_loading = false;
+            }
           },
         };
       }
@@ -612,7 +728,7 @@
   >
     <!-- Top Header Mobile First -->
     <header
-      class="border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-40"
+      class="border-b border-slate-800 pt-8 bg-slate-900/90 backdrop-blur-md sticky top-0 z-40"
     >
       <div
         class="px-4 py-3 flex items-center justify-between max-w-4xl mx-auto"
@@ -625,11 +741,11 @@
           </div>
           <div>
             <h1 class="text-sm font-bold text-white leading-tight">
-              Client Acquisition
+              Realtor Agent
             </h1>
             <p
               class="text-[10px] text-slate-400"
-              x-text="viewMode === 'form' ? `Step ${currentStep} of ${steps.length}` : 'Saved Records'"
+              x-text="viewMode === 'form' ? `Step ${currentStep} of ${steps.length}` : (user?.name ?? 'Guest')"
             ></p>
           </div>
         </div>
@@ -650,11 +766,10 @@
           </button>
 
           <button
-            x-show="viewMode === 'form'"
-            @click="showPayloadModal = true"
-            class="text-xs p-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700"
+            @click="logout()"
+            class="text-xs p-2 rounded-lg font-bold bg-[red] text-white border border-slate-700"
           >
-            <i class="fa-solid fa-code"></i>
+            <i class="fa-solid bi-power"></i> Logout
           </button>
         </div>
       </div>
@@ -710,7 +825,7 @@
 
         <!-- Card Grid for Mobile -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <template x-for="(item, idx) in savedClients" :key="item.client_id">
+          <template x-for="(item, idx) in savedClients" :key="item.email">
             <div
               class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between hover:border-slate-700 transition"
             >
@@ -718,21 +833,17 @@
                 <div class="flex items-center justify-between mb-2">
                   <span
                     class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-950 text-indigo-400 border border-indigo-800/40"
-                    x-text="item.client_id"
+                    x-text="item.bank.account_number"
                   ></span>
                   <span
                     class="text-[10px] text-slate-400"
-                    x-text="new Date(item.last_seen_at).toLocaleDateString()"
+                    x-text="new Date(item.meta?.account_opening_date ?? item.last_seen_at).toLocaleDateString()"
                   ></span>
                 </div>
                 <h3
                   class="text-sm font-bold text-white"
                   x-text="item.name || 'Unnamed Client'"
                 ></h3>
-                <div
-                  class="text-xs text-indigo-400 font-mono mb-2"
-                  x-text="'@' + item.username"
-                ></div>
 
                 <div
                   class="space-y-1 text-xs text-slate-300 border-t border-slate-800/80 pt-2"
@@ -752,7 +863,7 @@
                     <i class="fa-solid fa-landmark text-[10px] w-4"></i>
                     <span
                       class="text-emerald-400 font-semibold"
-                      x-text="`₦${item.meta?.amount_of_loan_required || 0} Loan`"
+                      x-text="`${format(item.equity_application?.equity_amount || 0)}`"
                     ></span>
                   </div>
                 </div>
@@ -763,10 +874,28 @@
                 class="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-slate-800"
               >
                 <button
+                  @click="init_client_media_upload(item.email)"
+                  class="text-xs px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                >
+                  <i class="fa-solid bi-files text-indigo-400"></i> Docs
+                </button>
+                <button
+                  @click="client_sign(item.email)"
+                  class="text-xs px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                >
+                  <i class="fa-solid fa-pen text-indigo-400"></i> Sign
+                </button>
+                <button
                   @click="previewClient(item)"
                   class="text-xs px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
                 >
-                  <i class="fa-solid fa-eye text-indigo-400"></i> Preview
+                  <i class="fa-solid fa-eye text-indigo-400"></i> View
+                </button>
+                <button
+                  @click="sync_client(item)"
+                  class="text-xs px-2.5 py-1 rounded-lg bg-green-800 hover:bg-slate-700 text-slate-200"
+                >
+                  <i class="fa-solid fa-sync text-indigo-400"></i> Sync
                 </button>
                 <button
                   @click="editClient(item)"
@@ -778,7 +907,7 @@
                   @click="deleteClient(item.client_id)"
                   class="text-xs px-2 py-1 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40"
                 >
-                  <i class="fa-solid fa-trash-can"></i>
+                  <i class="fa-solid fa-trash-can"></i> Del
                 </button>
               </div>
             </div>
@@ -862,7 +991,7 @@
                 <i class="fa-solid fa-user-gear text-indigo-400"></i> Personal &
                 Account Setup
               </h2>
-              <p class="text-[11px] text-slate-400">
+              <p class="text-[11px] text-slate-400" x-text="payload.name">
                 Basic details. Username is automatically system generated.
               </p>
             </div>
@@ -876,7 +1005,7 @@
                   type="text"
                   x-model="payload.first_name"
                   @input="updateFullName()"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                   placeholder="John"
                 />
               </div>
@@ -888,7 +1017,7 @@
                   type="text"
                   x-model="payload.surname"
                   @input="updateFullName()"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                   placeholder="Doe"
                 />
               </div>
@@ -900,25 +1029,13 @@
                   type="text"
                   x-model="payload.last_name"
                   @input="updateFullName()"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                   placeholder="Middle/Other Name"
                 />
               </div>
 
-              <div>
-                <label class="block text-xs font-semibold text-slate-300 mb-1"
-                  >Display Name</label
-                >
-                <input
-                  type="text"
-                  x-model="payload.name"
-                  readonly
-                  class="w-full bg-slate-800/50 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 cursor-not-allowed"
-                />
-              </div>
-
               <!-- System Generated Username -->
-              <div>
+              <div class="hidden">
                 <div class="flex justify-between items-center mb-1">
                   <label class="block text-xs font-semibold text-slate-300"
                     >System Username</label
@@ -951,19 +1068,8 @@
                 <input
                   type="email"
                   x-model="payload.email"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                   placeholder="john@example.com"
-                />
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-slate-300 mb-1"
-                  >Password *</label
-                >
-                <input
-                  type="password"
-                  x-model="payload.password"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
-                  placeholder="••••••••"
                 />
               </div>
               <div>
@@ -973,36 +1079,77 @@
                 <input
                   type="tel"
                   x-model="payload.phone_number"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
-                  placeholder="+1 (555) 000-0000"
+                      placeholder="Optional +234 81 666 36 567"
+                  class="input" 
                 />
               </div>
-
-              <div>
-                <label class="block text-xs font-semibold text-slate-300 mb-1"
-                  >Account Type</label
+              <!-- Bank Details -->
+              <div
+                x-init="payload.bank = payload.bank || {account_name: '', account_number: '', bank_name: ''}"
+                class="bg-indigo-950/30 border border-indigo-900/50 p-3 rounded-xl space-y-2.5"
+              >
+                <h4
+                  class="text-[11px] hidden font-bold uppercase tracking-wider text-indigo-400"
                 >
-                <select
-                  x-model="payload.account_type"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="standard">Standard Client</option>
-                  <option value="agent">Agent</option>
-                  <option value="personal">Personal</option>
-                </select>
+                  Payout Bank Details
+                </h4>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label class="block text-[11px] text-slate-300 mb-1"
+                      >Account Number</label
+                    >
+                    <input
+                      type="text"
+                      x-model="payload.bank.account_number"
+                      class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                    />
+                  </div>
+                  <div>
+                    <label class="block text-[11px] text-slate-300 mb-1"
+                      >Bank Name</label
+                    >
+                    <input
+                      type="text"
+                      x-model="payload.bank.bank_name"
+                      class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                    />
+                  </div>
+                  <div
+                    x-init="payload.meta = payload.meta || {account_opening_date: ''}"
+                  >
+                    <label class="block text-[11px] text-slate-300 mb-1"
+                      >Account Opening Date</label
+                    >
+                    <input
+                      type="date"
+                      x-model="payload.meta.account_opening_date"
+                      class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                    />
+                  </div>
+                  <div
+                    x-init="payload.equity_application = payload.equity_application || {equity_amount: 0,}"
+                  >
+                    <label
+                      class="block text-xs font-semibold text-slate-300 mb-1"
+                      >Equity Amount 25% (₦)</label
+                    >
+                    <input
+                      type="number"
+                      placeholder="Optional"
+                      x-model.number="payload.equity_application.equity_amount"
+                      class="input"
+                    />
+                  </div>
+                </div>
               </div>
               <div>
                 <label class="block text-xs font-semibold text-slate-300 mb-1"
                   >Gender</label
                 >
-                <select
-                  x-model="payload.gender"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
-                >
+                <select x-model="payload.gender" class="input">
                   <option value="">Select Gender</option>
                   <option value="male">Male</option>
                   <option value="female">Female</option>
-                  <option value="other">Other</option>
                 </select>
               </div>
             </div>
@@ -1035,7 +1182,7 @@
                 <select
                   x-model="payload.country_id"
                   @change="onCountryChange()"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                 >
                   <option value="">Select Country</option>
                   <template x-for="c in countries" :key="c.id">
@@ -1051,7 +1198,7 @@
                   x-model="payload.state_id"
                   @change="onStateChange()"
                   :disabled="!payload.country_id"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                  class="input disabled:opacity-50"
                 >
                   <option value="">Select State</option>
                   <template x-for="s in filteredStates" :key="s.id">
@@ -1066,7 +1213,7 @@
                 <select
                   x-model="payload.city_id"
                   :disabled="!payload.state_id"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                  class="input disabled:opacity-50"
                 >
                   <option value="">Select City</option>
                   <template x-for="ct in filteredCities" :key="ct.id">
@@ -1081,7 +1228,7 @@
                 <input
                   type="text"
                   x-model="payload.nationality"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                   placeholder="e.g. Nigerian"
                 />
               </div>
@@ -1093,7 +1240,7 @@
                 <input
                   type="text"
                   x-model="payload.residential_address"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                   placeholder="Full residential location"
                 />
               </div>
@@ -1143,7 +1290,7 @@
                 <input
                   type="text"
                   x-model="payload.nin"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                   placeholder="11-digit NIN"
                 />
               </div>
@@ -1154,7 +1301,7 @@
                 <input
                   type="text"
                   x-model="payload.bvn"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                   placeholder="11-digit BVN"
                 />
               </div>
@@ -1165,7 +1312,7 @@
                 <input
                   type="text"
                   x-model="payload.occupation"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                   placeholder="Software Engineer"
                 />
               </div>
@@ -1176,20 +1323,8 @@
                 <input
                   type="text"
                   x-model="payload.office_position"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                   placeholder="Senior Manager"
-                />
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-slate-300 mb-1"
-                  >Security PIN (4-Digits)</label
-                >
-                <input
-                  type="password"
-                  maxlength="4"
-                  x-model="payload.pin"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 tracking-widest"
-                  placeholder="••••"
                 />
               </div>
             </div>
@@ -1217,6 +1352,7 @@
             <!-- Next of Kin Box -->
             <div
               class="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 space-y-3"
+              x-init="payload.next_of_kin = payload.next_of_kin || {first_name: '', surname: '', email:'', relationship: '', phone_number: ''}"
             >
               <h3
                 class="text-xs font-bold text-indigo-400 flex items-center gap-1.5"
@@ -1265,6 +1401,17 @@
                     type="tel"
                     x-model="payload.next_of_kin.phone_number"
                     class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                    placeholder="+234 81 666 36 567"
+                  />
+                </div>
+                <div>
+                  <label class="block text-[11px] text-slate-300 mb-1"
+                    >Kin Email</label
+                  >
+                  <input
+                    type="email"
+                    x-model="payload.next_of_kin.email"
+                    class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
                   />
                 </div>
               </div>
@@ -1273,6 +1420,7 @@
             <!-- Referee Box -->
             <div
               class="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 space-y-3"
+              x-init="payload.referee = payload.referee || {name: '', referee_number: '', referee_account_number:'', known_period: '', current_account_with: '', bank_name_address: ''}"
             >
               <h3
                 class="text-xs font-bold text-indigo-400 flex items-center gap-1.5"
@@ -1286,7 +1434,7 @@
                   >
                   <input
                     type="text"
-                    x-model="payload.referee.referee_name"
+                    x-model="payload.referee.name"
                     class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
                   />
                 </div>
@@ -1298,6 +1446,51 @@
                     type="tel"
                     x-model="payload.referee.referee_number"
                     class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                    placeholder="+234 81 666 36 567"
+                  />
+                </div>
+                <div>
+                  <label class="block text-[11px] text-slate-300 mb-1"
+                    >How Long Have You Known Them?</label
+                  >
+                  <input
+                    type="text"
+                    x-model="payload.referee.known_period"
+                    class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                    placeholder="e.g., 2 years"
+                  />
+                </div>
+                <div>
+                  <label class="block text-[11px] text-slate-300 mb-1"
+                    >Relationship</label
+                  >
+                  <input
+                    type="text"
+                    x-model="payload.referee.current_account_with"
+                    class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                    placeholder="e.g., Colleague"
+                  />
+                </div>
+                <div>
+                  <label class="block text-[11px] text-slate-300 mb-1"
+                    >Bank Name & Address</label
+                  >
+                  <input
+                    type="text"
+                    x-model="payload.referee.bank_name_address"
+                    class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                    placeholder="e.g., First Bank, Lagos"
+                  />
+                </div>
+                <div>
+                  <label class="block text-[11px] text-slate-300 mb-1"
+                    >Referee Account Number</label
+                  >
+                  <input
+                    type="text"
+                    x-model="payload.referee.referee_account_number"
+                    class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
+                    placeholder="e.g., 1234567890"
                   />
                 </div>
               </div>
@@ -1307,6 +1500,7 @@
           <!-- STEP 5: Equity & Bank Details -->
           <div
             x-show="currentStep === 5"
+            x-init="payload.equity_application = payload.equity_application || {morgage_lender: '', equity_amount: 0, property_value: 0}"
             class="p-4 sm:p-6 space-y-4"
             x-transition:enter="transition ease-out duration-200 transform opacity-0 translate-x-2"
             x-transition:enter-end="opacity-100 translate-x-0"
@@ -1331,7 +1525,7 @@
                 <input
                   type="text"
                   x-model="payload.equity_application.morgage_lender"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                   placeholder="Lender Name"
                 />
               </div>
@@ -1342,17 +1536,19 @@
                 <input
                   type="number"
                   x-model.number="payload.equity_application.property_value"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                 />
               </div>
-              <div>
+              <div
+                x-init="payload.meta = payload.meta || {amount_of_loan_required: 0, account_opening_date: null,monthly_salary_or_income: 0}"
+              >
                 <label class="block text-xs font-semibold text-slate-300 mb-1"
                   >Loan Required (₦)</label
                 >
                 <input
                   type="number"
                   x-model.number="payload.meta.amount_of_loan_required"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                 />
               </div>
               <div>
@@ -1362,41 +1558,8 @@
                 <input
                   type="number"
                   x-model.number="payload.meta.monthly_salary_or_income"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  class="input"
                 />
-              </div>
-            </div>
-
-            <!-- Bank Details -->
-            <div
-              class="bg-indigo-950/30 border border-indigo-900/50 p-3 rounded-xl space-y-2.5"
-            >
-              <h4
-                class="text-[11px] font-bold uppercase tracking-wider text-indigo-400"
-              >
-                Payout Bank Details
-              </h4>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <div>
-                  <label class="block text-[11px] text-slate-300 mb-1"
-                    >Account Name</label
-                  >
-                  <input
-                    type="text"
-                    x-model="payload.bank.account_name"
-                    class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
-                  />
-                </div>
-                <div>
-                  <label class="block text-[11px] text-slate-300 mb-1"
-                    >Account Number</label
-                  >
-                  <input
-                    type="text"
-                    x-model="payload.bank.account_number"
-                    class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100"
-                  />
-                </div>
               </div>
             </div>
           </div>
@@ -1437,35 +1600,35 @@
                   <span class="text-slate-500">Client ID:</span>
                   <span
                     class="text-indigo-400 font-mono font-bold"
-                    x-text="payload.client_id"
+                    x-text="payload?.client_id"
                   ></span>
                 </p>
                 <p>
                   <span class="text-slate-500">Full Name:</span>
                   <span
                     class="text-slate-200 font-medium"
-                    x-text="payload.name || 'N/A'"
+                    x-text="payload?.name || 'N/A'"
                   ></span>
                 </p>
                 <p>
                   <span class="text-slate-500">Username:</span>
                   <span
                     class="text-indigo-300 font-mono"
-                    x-text="'@' + payload.username"
+                    x-text="'@' + payload?.username"
                   ></span>
                 </p>
                 <p>
                   <span class="text-slate-500">Email:</span>
                   <span
                     class="text-slate-200"
-                    x-text="payload.email || 'N/A'"
+                    x-text="payload?.email || 'N/A'"
                   ></span>
                 </p>
                 <p>
                   <span class="text-slate-500">Phone:</span>
                   <span
                     class="text-slate-200"
-                    x-text="payload.phone_number || 'N/A'"
+                    x-text="payload?.phone_number || 'N/A'"
                   ></span>
                 </p>
               </div>
@@ -1477,14 +1640,14 @@
                   <span class="text-slate-500">Next of Kin:</span>
                   <span
                     class="text-slate-200"
-                    x-text="payload.next_of_kin.name || 'N/A'"
+                    x-text="payload?.next_of_kin.name || 'N/A'"
                   ></span>
                 </p>
                 <p>
                   <span class="text-slate-500">Loan Amount:</span>
                   <span
                     class="text-emerald-400 font-semibold"
-                    x-text="`₦${payload.meta.amount_of_loan_required || 0}`"
+                    x-text="`₦${payload?.meta?.amount_of_loan_required || 0}`"
                   ></span>
                 </p>
               </div>
@@ -1512,23 +1675,136 @@
               </button>
             </template>
 
-            <template x-if="currentStep === steps.length">
-              <button
-                @click="save_client()"
-                :disabled="loading"
-                class="px-5 py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 transition flex items-center gap-1.5"
-              >
-                <i class="fa-solid fa-floppy-disk"></i>
-                <span
-                  x-text="isEditMode ? 'Update Client' : 'Save to Storage'"
-                ></span>
-              </button>
-            </template>
+            <!-- <template x-if="currentStep === steps.length"> -->
+            <button
+              @click="save_client()"
+              :disabled="loading"
+              class="px-5 py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 transition flex items-center gap-1.5"
+            >
+              <i class="fa-solid fa-floppy-disk"></i>
+              <span
+                x-text="isEditMode ? 'Update Client' : 'Save to Storage'"
+              ></span>
+            </button>
+            <!-- </template> -->
           </div>
         </div>
       </div>
     </main>
 
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md"
+      x-show="client_media_modal"
+    >
+      <form
+        class="glass-panel w-full max-w-md space-y-4 rounded-3xl border border-cyan-500/40 p-5"
+        enctype="multipart/form-data"
+        method="post"
+        :action="'https://api.almaxcloud.com/api/v1/realtor/client/upload/media'"
+        @submit.prevent="submit_client_media($el)"
+      >
+        <div class="flex items-center justify-between">
+          <div>
+            <h3
+              class="text-sm font-bold text-white"
+              x-text="'Upload images'"
+            ></h3>
+          </div>
+          <button
+            class="text-gray-400 hover:text-white"
+            type="button"
+            @click="client_media_modal = false; clear_client_media_selection(); client_media_uploading = false"
+          >
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <div
+          class="rounded-2xl border border-dashed border-cyan-500/40 bg-cyan-500/5 p-4"
+        >
+          <label
+            class="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-cyan-500/20 bg-black/20 px-4 py-6 text-center transition hover:border-cyan-400/70 hover:bg-cyan-500/10"
+            for="client_media_upload_input"
+          >
+            <span
+              class="flex h-12 w-12 items-center justify-center rounded-full bg-cyan-500/15 text-xl text-cyan-300"
+            >
+              <i class="bi bi-cloud-arrow-up"></i>
+            </span>
+            <span class="text-xs font-semibold text-white"
+              >Select Documents or photos</span
+            >
+            <span class="text-[10px] uppercase tracking-[0.2em] text-gray-400"
+              >PNG, JPG, WEBP • multiple files</span
+            >
+            <input
+              class="hidden"
+              id="client_media_upload_input"
+              name="files[]"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              multiple
+              @change="handle_client_media_selection($event)"
+            />
+          </label>
+        </div>
+
+        <div class="space-y-2" x-show="client_media_previews.length">
+          <div class="flex items-center justify-between">
+            <p
+              class="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400"
+            >
+              Selected images
+            </p>
+            <button
+              class="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-300"
+              type="button"
+              @click="clear_client_media_selection()"
+            >
+              Clear
+            </button>
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <template
+              x-for="preview in client_media_previews"
+              :key="preview.id"
+            >
+              <div
+                class="relative overflow-hidden rounded-xl border border-white/10 bg-black/30"
+              >
+                <img
+                  class="h-20 w-full object-cover"
+                  alt="Selected file preview"
+                  :src="preview.url"
+                />
+                <div
+                  class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1 text-[9px] text-white"
+                  x-text="preview.name"
+                ></div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 pt-1">
+          <button
+            class="rounded-xl border border-white/10 bg-white/5 py-3 text-xs font-bold text-gray-200"
+            type="button"
+            @click="client_media_modal = false; clear_client_media_selection(); client_media_uploading = false"
+          >
+            Cancel
+          </button>
+          <button
+            class="rounded-xl bg-cyan-500 py-3 text-xs font-bold text-black disabled:opacity-60"
+            type="submit"
+            :disabled="client_media_uploading || !client_media_files.length"
+          >
+            <span x-show="!client_media_uploading">Upload</span>
+            <span x-show="client_media_uploading">Uploading...</span>
+          </button>
+        </div>
+      </form>
+    </div>
     <!-- Modal: Client Detailed Preview -->
     <div
       x-show="showPreviewModal"
@@ -1690,7 +1966,7 @@
     <footer
       class="border-t border-slate-900 py-3 text-center text-[11px] text-slate-600"
     >
-      Mobile-First Realtor Onboarding Wizard
+      Powered by <a href="https://almaxcloud.com">ALmax Cloud</a>
     </footer>
   </body>
 </html>
